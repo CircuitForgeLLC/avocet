@@ -363,6 +363,8 @@ with tab_fetch:
 
         fetched_all: list[dict] = []
         status = st.status("Fetching…", expanded=True)
+        # Single updatable slot for per-email progress — overwrites instead of appending
+        _live = status.empty()
 
         for acc in accounts:
             name = acc.get("name", acc.get("username"))
@@ -373,11 +375,13 @@ with tab_fetch:
                 emails = _fetch_account(
                     acc, days=int(days), limit=int(limit),
                     known_keys=existing_keys,
-                    progress_cb=lambda p, msg: status.write(msg),
+                    progress_cb=lambda p, msg: _live.markdown(f"⏳ {msg}"),
                 )
+                _live.empty()  # clear progress line once account is done
                 fetched_all.extend(emails)
                 status.write(f"✓ {name}: {len(emails)} new emails")
             except Exception as e:
+                _live.empty()
                 status.write(f"✗ {name}: {e}")
 
         if fetched_all:
