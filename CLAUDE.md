@@ -34,7 +34,7 @@ conda run -n job-seeker streamlit run app/label_tool.py --server.port 8503
 - Queue: `data/email_label_queue.jsonl` (gitignored)
 - Output: `data/email_score.jsonl` (gitignored)
 - Four tabs: 🃏 Label, 📥 Fetch, 📊 Stats, ⚙️ Settings
-- Keyboard shortcuts: 1–6 = label, S = skip, U = undo
+- Keyboard shortcuts: 1–9 = label, 0 = Other (wildcard, prompts free-text input), S = skip, U = undo
 - Dedup: MD5 of `(subject + body[:100])` — cross-account safe
 
 ### Settings Tab (⚙️)
