@@ -30,12 +30,20 @@ Card-stack Streamlit UI for manually labeling recruitment emails.
 conda run -n job-seeker streamlit run app/label_tool.py --server.port 8503
 ```
 
-- Config: `config/label_tool.yaml` (gitignored — copy from `.example`)
+- Config: `config/label_tool.yaml` (gitignored — copy from `.example`, or use ⚙️ Settings tab)
 - Queue: `data/email_label_queue.jsonl` (gitignored)
 - Output: `data/email_score.jsonl` (gitignored)
-- Three tabs: 🃏 Label, 📥 Fetch, 📊 Stats
+- Four tabs: 🃏 Label, 📥 Fetch, 📊 Stats, ⚙️ Settings
 - Keyboard shortcuts: 1–6 = label, S = skip, U = undo
 - Dedup: MD5 of `(subject + body[:100])` — cross-account safe
+
+### Settings Tab (⚙️)
+- Add / edit / remove IMAP accounts via form UI — no manual YAML editing required
+- Per-account fields: display name, host, port, SSL toggle, username, password (masked), folder, days back
+- **🔌 Test connection** button per account — connects, logs in, selects folder, reports message count
+- Global: max emails per account per fetch
+- **💾 Save** writes `config/label_tool.yaml`; **↩ Reload** discards unsaved changes
+- `_sync_settings_to_state()` collects widget values before any add/remove to avoid index-key drift
 
 ## Benchmark (scripts/benchmark_classifier.py)
 
