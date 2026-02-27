@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+*.egg-info/
+
+# Secrets and personal data
+config/label_tool.yaml
+
+# Data files (user-generated, not for version control)
+data/email_score.jsonl
+data/email_label_queue.jsonl
+data/email_compare_sample.jsonl
+
+# Conda/pip artifacts
+.env

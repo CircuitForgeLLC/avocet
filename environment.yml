@@ -1,0 +1,25 @@
+name: job-seeker-classifiers
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    # UI
+    - streamlit>=1.32
+    - pyyaml>=6.0
+
+    # Classifier backends (heavy — install selectively)
+    - transformers>=4.40
+    - torch>=2.2
+    - accelerate>=0.27
+
+    # Optional: GLiClass adapter
+    # - gliclass
+
+    # Optional: BGE reranker adapter
+    # - FlagEmbedding
+
+    # Dev
+    - pytest>=8.0
