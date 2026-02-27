@@ -2,11 +2,14 @@
 import pytest
 
 
-def test_labels_constant_has_six_items():
+def test_labels_constant_has_nine_items():
     from scripts.classifier_adapters import LABELS
-    assert len(LABELS) == 6
+    assert len(LABELS) == 9
     assert "interview_scheduled" in LABELS
     assert "neutral" in LABELS
+    assert "event_rescheduled" in LABELS
+    assert "unrelated" in LABELS
+    assert "digest" in LABELS
 
 
 def test_compute_metrics_perfect_predictions():

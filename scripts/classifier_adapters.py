@@ -26,6 +26,9 @@ LABELS: list[str] = [
     "positive_response",
     "survey_received",
     "neutral",
+    "event_rescheduled",
+    "unrelated",
+    "digest",
 ]
 
 # Natural-language descriptions used by the RerankerAdapter.
@@ -35,7 +38,10 @@ LABEL_DESCRIPTIONS: dict[str, str] = {
     "rejected": "application rejected or not moving forward with candidacy",
     "positive_response": "positive recruiter interest or request to connect",
     "survey_received": "invitation to complete a culture-fit survey or assessment",
-    "neutral": "automated ATS confirmation or unrelated email",
+    "neutral": "automated ATS confirmation such as application received",
+    "event_rescheduled": "an interview or scheduled event moved to a new time",
+    "unrelated": "non-job-search email unrelated to any application or recruiter",
+    "digest": "job digest or multi-listing email with multiple job postings",
 }
 
 # Lazy import shims — allow tests to patch without requiring the libs installed.

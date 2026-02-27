@@ -66,14 +66,17 @@ conda run -n job-seeker-classifiers python scripts/benchmark_classifier.py --exp
 
 ## Labels (peregrine defaults — configurable per product)
 
-| Label | Meaning |
-|-------|---------|
-| `interview_scheduled` | Phone screen, video call, or on-site invitation |
-| `offer_received` | Formal job offer or offer letter |
-| `rejected` | Application declined or not moving forward |
-| `positive_response` | Recruiter interest or request to connect |
-| `survey_received` | Culture-fit survey or assessment invitation |
-| `neutral` | ATS confirmation or unrelated email |
+| Label | Key | Meaning |
+|-------|-----|---------|
+| `interview_scheduled` | 1 | Phone screen, video call, or on-site invitation |
+| `offer_received` | 2 | Formal job offer or offer letter |
+| `rejected` | 3 | Application declined or not moving forward |
+| `positive_response` | 4 | Recruiter interest or request to connect |
+| `survey_received` | 5 | Culture-fit survey or assessment invitation |
+| `neutral` | 6 | ATS confirmation (application received, etc.) |
+| `event_rescheduled` | 7 | Interview or event moved to a new time |
+| `unrelated` | 8 | Non-job-search email, not classifiable |
+| `digest` | 9 | Job digest or multi-listing email (scrapeable) |
 
 ## Model Registry (13 models, 7 defaults)
 
