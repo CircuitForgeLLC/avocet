@@ -106,6 +106,27 @@ def _extract_body(msg: Any) -> str:
     return ""
 
 
+def _test_imap_connection(acc: dict) -> tuple[bool, str]:
+    """Try connect → login → select folder. Returns (ok, human message)."""
+    host     = acc.get("host", "")
+    port     = int(acc.get("port", 993))
+    use_ssl  = acc.get("use_ssl", True)
+    username = acc.get("username", "")
+    password = acc.get("password", "")
+    folder   = acc.get("folder", "INBOX")
+    if not host or not username or not password:
+        return False, "Host, username, and password are all required."
+    try:
+        conn = (imaplib.IMAP4_SSL if use_ssl else imaplib.IMAP4)(host, port)
+        conn.login(username, password)
+        typ, data = conn.select(folder, readonly=True)
+        count = data[0].decode() if data and data[0] else "?"
+        conn.logout()
+        return True, f"Connected — {count} message(s) in {folder}."
+    except Exception as exc:
+        return False, str(exc)
+
+
 def _fetch_account(cfg: dict, days: int, limit: int, known_keys: set[str],
                    progress_cb=None) -> list[dict]:
     """Fetch emails from one IMAP account using wide recruitment search terms."""
@@ -308,7 +329,7 @@ with st.sidebar:
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
 
-tab_label, tab_fetch, tab_stats = st.tabs(["🃏 Label", "📥 Fetch", "📊 Stats"])
+tab_label, tab_fetch, tab_stats, tab_settings = st.tabs(["🃏 Label", "📥 Fetch", "📊 Stats", "⚙️ Settings"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -566,3 +587,144 @@ with tab_stats:
                 file_name="email_score.jsonl",
                 mime="application/jsonlines",
             )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SETTINGS TAB
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _sync_settings_to_state() -> None:
+    """Collect current widget values back into settings_accounts, then clear
+    widget keys so the next render picks up freshly from the updated list."""
+    accounts = st.session_state.get("settings_accounts", [])
+    synced = []
+    for i in range(len(accounts)):
+        synced.append({
+            "name":      st.session_state.get(f"s_name_{i}",   accounts[i].get("name", "")),
+            "host":      st.session_state.get(f"s_host_{i}",   accounts[i].get("host", "imap.gmail.com")),
+            "port":      int(st.session_state.get(f"s_port_{i}", accounts[i].get("port", 993))),
+            "use_ssl":   bool(st.session_state.get(f"s_ssl_{i}",  accounts[i].get("use_ssl", True))),
+            "username":  st.session_state.get(f"s_user_{i}",   accounts[i].get("username", "")),
+            "password":  st.session_state.get(f"s_pass_{i}",   accounts[i].get("password", "")),
+            "folder":    st.session_state.get(f"s_folder_{i}", accounts[i].get("folder", "INBOX")),
+            "days_back": int(st.session_state.get(f"s_days_{i}", accounts[i].get("days_back", 90))),
+        })
+    st.session_state.settings_accounts = synced
+    for key in list(st.session_state.keys()):
+        if key.startswith("s_"):
+            del st.session_state[key]
+
+
+with tab_settings:
+    # ── Init from disk on first load ─────────────────────────────────────────
+    if "settings_accounts" not in st.session_state:
+        _cfg_raw = yaml.safe_load(_CFG_FILE.read_text()) or {} if _CFG_FILE.exists() else {}
+        st.session_state.settings_accounts = [dict(a) for a in _cfg_raw.get("accounts", [])]
+        st.session_state.settings_max = _cfg_raw.get("max_per_account", 500)
+
+    _accs = st.session_state.settings_accounts
+
+    st.subheader("📧 IMAP Accounts")
+    st.caption(
+        "Credentials are saved to `config/label_tool.yaml` (gitignored). "
+        "Use an **App Password** for Gmail/Outlook — not your login password."
+    )
+
+    if not _accs:
+        st.info("No accounts configured yet. Click **➕ Add account** to get started.", icon="📭")
+
+    _to_remove = None
+    for _i, _acc in enumerate(_accs):
+        _label = f"**{_acc.get('name', 'Unnamed')}** — {_acc.get('username', '(no username)')}"
+        with st.expander(_label, expanded=not _acc.get("username")):
+            _c1, _c2 = st.columns(2)
+            _c1.text_input("Display name",  key=f"s_name_{_i}", value=_acc.get("name", ""))
+            _c2.text_input("IMAP host",     key=f"s_host_{_i}", value=_acc.get("host", "imap.gmail.com"))
+
+            _c3, _c4, _c5 = st.columns([3, 2, 1])
+            _c3.text_input("Username / email", key=f"s_user_{_i}", value=_acc.get("username", ""))
+            _c4.number_input("Port", key=f"s_port_{_i}", value=int(_acc.get("port", 993)),
+                             min_value=1, max_value=65535, step=1)
+            _c5.checkbox("SSL", key=f"s_ssl_{_i}", value=bool(_acc.get("use_ssl", True)))
+
+            st.text_input("Password / app password", key=f"s_pass_{_i}",
+                          value=_acc.get("password", ""), type="password")
+
+            _c6, _c7 = st.columns(2)
+            _c6.text_input("Folder",     key=f"s_folder_{_i}", value=_acc.get("folder", "INBOX"))
+            _c7.number_input("Default days back", key=f"s_days_{_i}",
+                             value=int(_acc.get("days_back", 90)), min_value=1, max_value=730)
+
+            _btn_l, _btn_r = st.columns([1, 3])
+            if _btn_l.button("🗑️ Remove", key=f"s_remove_{_i}"):
+                _to_remove = _i
+            if _btn_r.button("🔌 Test connection", key=f"s_test_{_i}"):
+                _test_acc = {
+                    "host":     st.session_state.get(f"s_host_{_i}",   _acc.get("host", "")),
+                    "port":     st.session_state.get(f"s_port_{_i}",   _acc.get("port", 993)),
+                    "use_ssl":  st.session_state.get(f"s_ssl_{_i}",    _acc.get("use_ssl", True)),
+                    "username": st.session_state.get(f"s_user_{_i}",   _acc.get("username", "")),
+                    "password": st.session_state.get(f"s_pass_{_i}",   _acc.get("password", "")),
+                    "folder":   st.session_state.get(f"s_folder_{_i}", _acc.get("folder", "INBOX")),
+                }
+                with st.spinner("Connecting…"):
+                    _ok, _msg = _test_imap_connection(_test_acc)
+                if _ok:
+                    st.success(_msg)
+                else:
+                    st.error(f"Connection failed: {_msg}")
+
+    if _to_remove is not None:
+        _sync_settings_to_state()
+        st.session_state.settings_accounts.pop(_to_remove)
+        st.rerun()
+
+    if st.button("➕ Add account"):
+        _sync_settings_to_state()
+        st.session_state.settings_accounts.append({
+            "name": f"Account {len(_accs) + 1}",
+            "host": "imap.gmail.com", "port": 993, "use_ssl": True,
+            "username": "", "password": "", "folder": "INBOX", "days_back": 90,
+        })
+        st.rerun()
+
+    st.divider()
+    st.subheader("⚙️ Global Settings")
+    st.number_input(
+        "Max emails per account per fetch (0 = unlimited)",
+        key="s_max_per_account",
+        value=st.session_state.settings_max,
+        min_value=0, max_value=5000, step=50,
+    )
+
+    st.divider()
+    _save_col, _reload_col = st.columns([3, 1])
+    if _save_col.button("💾 Save settings", type="primary", use_container_width=True):
+        _saved_accounts = []
+        for _i in range(len(st.session_state.settings_accounts)):
+            _a = st.session_state.settings_accounts[_i]
+            _saved_accounts.append({
+                "name":      st.session_state.get(f"s_name_{_i}",   _a.get("name", "")),
+                "host":      st.session_state.get(f"s_host_{_i}",   _a.get("host", "imap.gmail.com")),
+                "port":      int(st.session_state.get(f"s_port_{_i}", _a.get("port", 993))),
+                "use_ssl":   bool(st.session_state.get(f"s_ssl_{_i}",  _a.get("use_ssl", True))),
+                "username":  st.session_state.get(f"s_user_{_i}",   _a.get("username", "")),
+                "password":  st.session_state.get(f"s_pass_{_i}",   _a.get("password", "")),
+                "folder":    st.session_state.get(f"s_folder_{_i}", _a.get("folder", "INBOX")),
+                "days_back": int(st.session_state.get(f"s_days_{_i}", _a.get("days_back", 90))),
+            })
+        _cfg_out = {
+            "accounts": _saved_accounts,
+            "max_per_account": int(st.session_state.get("s_max_per_account", 500)),
+        }
+        _CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CFG_FILE.write_text(yaml.dump(_cfg_out, default_flow_style=False, allow_unicode=True))
+        st.session_state.settings_accounts = _saved_accounts
+        st.session_state.settings_max = _cfg_out["max_per_account"]
+        st.success(f"Saved {len(_saved_accounts)} account(s) to `config/label_tool.yaml`.")
+
+    if _reload_col.button("↩ Reload", use_container_width=True, help="Discard unsaved changes and reload from disk"):
+        for _k in list(st.session_state.keys()):
+            if _k in ("settings_accounts", "settings_max") or _k.startswith("s_"):
+                del st.session_state[_k]
+        st.rerun()
