@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import email as _email_lib
 import hashlib
+import html as _html
 import imaplib
 import json
+import re
 import sys
 from datetime import datetime, timedelta
 from email.header import decode_header as _raw_decode
@@ -40,6 +42,9 @@ LABELS = [
     "positive_response",
     "survey_received",
     "neutral",
+    "event_rescheduled",
+    "unrelated",
+    "digest",
 ]
 
 _LABEL_META: dict[str, dict] = {
@@ -49,9 +54,31 @@ _LABEL_META: dict[str, dict] = {
     "positive_response":   {"emoji": "👍", "color": "#FF9800", "key": "4"},
     "survey_received":     {"emoji": "📋", "color": "#9C27B0", "key": "5"},
     "neutral":             {"emoji": "⬜", "color": "#607D8B", "key": "6"},
+    "event_rescheduled":   {"emoji": "🔄", "color": "#FF5722", "key": "7"},
+    "unrelated":           {"emoji": "🗑️", "color": "#757575", "key": "8"},
+    "digest":              {"emoji": "📰", "color": "#00BCD4", "key": "9"},
 }
 
-# ── Wide IMAP search terms (cast a net across all 6 categories) ─────────────
+# ── HTML sanitiser ───────────────────────────────────────────────────────────
+# Valid chars per XML 1.0 §2.2 (same set HTML5 innerHTML enforces):
+#   #x9 | #xA | #xD | [#x20–#xD7FF] | [#xE000–#xFFFD] | [#x10000–#x10FFFF]
+# Anything outside this range causes InvalidCharacterError in the browser.
+_INVALID_XML_CHARS = re.compile(
+    r"[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]"
+)
+
+def _to_html(text: str, newlines_to_br: bool = False) -> str:
+    """Strip invalid XML chars, HTML-escape the result, optionally convert \\n → <br>."""
+    if not text:
+        return ""
+    cleaned = _INVALID_XML_CHARS.sub("", text)
+    escaped = _html.escape(cleaned)
+    if newlines_to_br:
+        escaped = escaped.replace("\n", "<br>")
+    return escaped
+
+
+# ── Wide IMAP search terms (cast a net across all 9 categories) ─────────────
 _WIDE_TERMS = [
     # interview_scheduled
     "interview", "phone screen", "video call", "zoom link", "schedule a call",
@@ -68,6 +95,11 @@ _WIDE_TERMS = [
     # neutral / ATS confirms
     "application received", "thank you for applying", "application confirmation",
     "you applied", "your application for",
+    # event_rescheduled
+    "reschedule", "rescheduled", "new time", "moved to", "postponed", "new date",
+    # digest
+    "job digest", "jobs you may like", "recommended jobs", "jobs for you",
+    "new jobs", "job alert",
     # general recruitment
     "application", "recruiter", "recruiting", "hiring", "candidate",
 ]
@@ -441,9 +473,9 @@ with tab_label:
 
         st.markdown(
             f"""<div class="email-card">
-<div class="card-meta">{from_} &nbsp;·&nbsp; {date_[:16]} &nbsp;·&nbsp; <em>{acct}</em></div>
-<div class="card-subject">{subj}</div>
-<div class="card-body">{body[:500].replace(chr(10), '<br>')}</div>
+<div class="card-meta">{_to_html(from_)} &nbsp;·&nbsp; {_to_html(date_[:16])} &nbsp;·&nbsp; <em>{_to_html(acct)}</em></div>
+<div class="card-subject">{_to_html(subj)}</div>
+<div class="card-body">{_to_html(body[:500], newlines_to_br=True)}</div>
 </div>""",
             unsafe_allow_html=True,
         )
@@ -470,8 +502,15 @@ with tab_label:
                 next_idx += 1
             st.session_state.idx = next_idx
 
+        # Pre-compute per-label counts once
+        _counts: dict[str, int] = {}
+        for _r in st.session_state.labeled:
+            _lbl_r = _r.get("label", "")
+            _counts[_lbl_r] = _counts.get(_lbl_r, 0) + 1
+
         row1_cols = st.columns(3)
         row2_cols = st.columns(3)
+        row3_cols = st.columns(3)
         bucket_pairs = [
             (row1_cols[0], "interview_scheduled"),
             (row1_cols[1], "offer_received"),
@@ -479,15 +518,40 @@ with tab_label:
             (row2_cols[0], "positive_response"),
             (row2_cols[1], "survey_received"),
             (row2_cols[2], "neutral"),
+            (row3_cols[0], "event_rescheduled"),
+            (row3_cols[1], "unrelated"),
+            (row3_cols[2], "digest"),
         ]
         for col, lbl in bucket_pairs:
             m = _LABEL_META[lbl]
-            counts = {l: 0 for l in LABELS}
-            for r in st.session_state.labeled:
-                counts[r.get("label", "")] = counts.get(r.get("label", ""), 0) + 1
-            label_display = f"{m['emoji']} **{lbl}** [{counts[lbl]}]\n`{m['key']}`"
+            cnt = _counts.get(lbl, 0)
+            label_display = f"{m['emoji']} **{lbl}** [{cnt}]\n`{m['key']}`"
             if col.button(label_display, key=f"lbl_{lbl}", use_container_width=True):
                 _do_label(lbl)
+                st.rerun()
+
+        # ── Wildcard label ─────────────────────────────────────────────────
+        if "show_custom" not in st.session_state:
+            st.session_state.show_custom = False
+
+        other_col, _ = st.columns([1, 2])
+        if other_col.button("🏷️ Other… `0`", key="lbl_other_toggle", use_container_width=True):
+            st.session_state.show_custom = not st.session_state.show_custom
+            st.rerun()
+
+        if st.session_state.get("show_custom"):
+            custom_cols = st.columns([3, 1])
+            custom_val = custom_cols[0].text_input(
+                "Custom label:", key="custom_label_text",
+                placeholder="e.g. linkedin_outreach",
+                label_visibility="collapsed",
+            )
+            if custom_cols[1].button(
+                "✓ Apply", key="apply_custom", type="primary",
+                disabled=not (custom_val or "").strip(),
+            ):
+                _do_label(custom_val.strip().lower().replace(" ", "_"))
+                st.session_state.show_custom = False
                 st.rerun()
 
         # ── Navigation ────────────────────────────────────────────────────
@@ -495,7 +559,7 @@ with tab_label:
         nav_cols = st.columns([2, 1, 1])
 
         remaining = len(unlabeled) - 1
-        nav_cols[0].caption(f"**{remaining}** remaining  ·  Keys: 1–6 = label, S = skip, U = undo")
+        nav_cols[0].caption(f"**{remaining}** remaining  ·  Keys: 1–9 = label, 0 = other, S = skip, U = undo")
 
         if nav_cols[1].button("↩ Undo", disabled=not st.session_state.history, use_container_width=True):
             prev_idx, prev_label = st.session_state.history.pop()
@@ -521,7 +585,8 @@ document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     const keyToLabel = {
         '1':'interview_scheduled','2':'offer_received','3':'rejected',
-        '4':'positive_response','5':'survey_received','6':'neutral'
+        '4':'positive_response','5':'survey_received','6':'neutral',
+        '7':'event_rescheduled','8':'unrelated','9':'digest'
     };
     const label = keyToLabel[e.key];
     if (label) {
@@ -530,6 +595,11 @@ document.addEventListener('keydown', function(e) {
             if (btn.innerText.toLowerCase().includes(label.replace('_',' '))) {
                 btn.click(); break;
             }
+        }
+    } else if (e.key === '0') {
+        const btns = window.parent.document.querySelectorAll('button');
+        for (const btn of btns) {
+            if (btn.innerText.includes('Other')) { btn.click(); break; }
         }
     } else if (e.key.toLowerCase() === 's') {
         const btns = window.parent.document.querySelectorAll('button');
@@ -558,19 +628,25 @@ with tab_stats:
     if not labeled:
         st.info("No labeled emails yet.")
     else:
-        counts = {lbl: 0 for lbl in LABELS}
+        counts: dict[str, int] = {}
         for r in labeled:
             lbl = r.get("label", "")
-            if lbl in counts:
-                counts[lbl] += 1
+            if lbl:
+                counts[lbl] = counts.get(lbl, 0) + 1
 
         st.markdown(f"**{len(labeled)} labeled emails total**")
 
-        for lbl in LABELS:
-            m = _LABEL_META[lbl]
+        # Show known labels first, then any custom labels
+        all_display_labels = list(LABELS) + [l for l in counts if l not in LABELS]
+        max_count = max(counts.values()) if counts else 1
+        for lbl in all_display_labels:
+            if lbl not in counts:
+                continue
+            m = _LABEL_META.get(lbl)
+            emoji = m["emoji"] if m else "🏷️"
             col_name, col_bar, col_n = st.columns([3, 5, 1])
-            col_name.markdown(f"{m['emoji']} {lbl}")
-            col_bar.progress(counts[lbl] / max(counts.values()) if counts.values() else 0)
+            col_name.markdown(f"{emoji} {lbl}")
+            col_bar.progress(counts[lbl] / max_count)
             col_n.markdown(f"**{counts[lbl]}**")
 
         st.divider()
