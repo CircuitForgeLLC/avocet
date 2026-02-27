@@ -184,7 +184,7 @@ case "$CMD" in
             kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
             rm -f "$PID_FILE" "$PORT_FILE"
         fi
-        exec "$0" start
+        exec bash "$0" start
         ;;
 
     status)
