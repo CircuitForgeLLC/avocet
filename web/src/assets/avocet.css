@@ -1,0 +1,8 @@
+/* Avocet app color overrides — Slate Teal + Russet */
+/* These override the base --app-primary/--app-accent from theme.css */
+:root {
+  --app-primary:      #2A6080;  /* Slate Teal — "deep water" */
+  --app-primary-dark: #5A9DBF;
+  --app-accent:       #B8622A;  /* Russet — avocet's orange head */
+  --app-accent-dark:  #D4854A;
+}
