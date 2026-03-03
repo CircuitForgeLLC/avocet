@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 
 _ROOT = Path(__file__).parent.parent
 _DATA_DIR: Path = _ROOT / "data"   # overridable in tests via set_data_dir()
@@ -61,3 +61,9 @@ app = FastAPI(title="Avocet API")
 
 # In-memory last-action store (single user, local tool — in-memory is fine)
 _last_action: dict | None = None
+
+
+@app.get("/api/queue")
+def get_queue(limit: int = Query(default=10, ge=1, le=50)):
+    items = _read_jsonl(_queue_file())
+    return {"items": items[:limit], "total": len(items)}
