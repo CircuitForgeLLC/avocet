@@ -52,3 +52,24 @@ def test_queue_empty_when_no_file(client):
     r = client.get("/api/queue")
     assert r.status_code == 200
     assert r.json() == {"items": [], "total": 0}
+
+
+def test_label_appends_to_score(client, queue_with_items):
+    from app import api as api_module
+    r = client.post("/api/label", json={"id": "id0", "label": "interview_scheduled"})
+    assert r.status_code == 200
+    records = api_module._read_jsonl(api_module._score_file())
+    assert len(records) == 1
+    assert records[0]["id"] == "id0"
+    assert records[0]["label"] == "interview_scheduled"
+    assert "labeled_at" in records[0]
+
+def test_label_removes_from_queue(client, queue_with_items):
+    from app import api as api_module
+    client.post("/api/label", json={"id": "id0", "label": "rejected"})
+    queue = api_module._read_jsonl(api_module._queue_file())
+    assert not any(x["id"] == "id0" for x in queue)
+
+def test_label_unknown_id_returns_404(client, queue_with_items):
+    r = client.post("/api/label", json={"id": "unknown", "label": "neutral"})
+    assert r.status_code == 404

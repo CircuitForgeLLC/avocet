@@ -8,7 +8,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from datetime import datetime, timezone
+
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel
 
 _ROOT = Path(__file__).parent.parent
 _DATA_DIR: Path = _ROOT / "data"   # overridable in tests via set_data_dir()
@@ -67,3 +70,23 @@ _last_action: dict | None = None
 def get_queue(limit: int = Query(default=10, ge=1, le=50)):
     items = _read_jsonl(_queue_file())
     return {"items": items[:limit], "total": len(items)}
+
+
+class LabelRequest(BaseModel):
+    id: str
+    label: str
+
+
+@app.post("/api/label")
+def post_label(req: LabelRequest):
+    global _last_action
+    items = _read_jsonl(_queue_file())
+    match = next((x for x in items if x["id"] == req.id), None)
+    if not match:
+        raise HTTPException(404, f"Item {req.id!r} not found in queue")
+    record = {**match, "label": req.label,
+              "labeled_at": datetime.now(timezone.utc).isoformat()}
+    _append_jsonl(_score_file(), record)
+    _write_jsonl(_queue_file(), [x for x in items if x["id"] != req.id])
+    _last_action = {"type": "label", "item": record}
+    return {"ok": True}
