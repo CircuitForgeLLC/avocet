@@ -116,6 +116,9 @@ def test_undo_label_removes_from_score(client, queue_with_items):
     assert data["undone"]["type"] == "label"
     score = api_module._read_jsonl(api_module._score_file())
     assert score == []
+    # Item should be restored to front of queue
+    queue = api_module._read_jsonl(api_module._queue_file())
+    assert queue[0]["id"] == "id0"
 
 def test_undo_discard_removes_from_discarded(client, queue_with_items):
     from app import api as api_module

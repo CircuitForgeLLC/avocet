@@ -134,28 +134,32 @@ def delete_undo():
     if not _last_action:
         raise HTTPException(404, "No action to undo")
     action = _last_action
-    _last_action = None
-
     item = action["item"]   # always the original clean queue item
 
+    # Perform file operations FIRST — only clear _last_action on success
     if action["type"] == "label":
-        # Remove last entry from score file
         records = _read_jsonl(_score_file())
+        if not records:
+            raise HTTPException(409, "Score file is empty — cannot undo label")
         _write_jsonl(_score_file(), records[:-1])
-    elif action["type"] == "discard":
-        # Remove last entry from discarded file
-        records = _read_jsonl(_discarded_file())
-        _write_jsonl(_discarded_file(), records[:-1])
-    elif action["type"] == "skip":
-        # Item is at back of queue — move it to front
         items = _read_jsonl(_queue_file())
-        reordered = [item] + [x for x in items if x["id"] != item["id"]]
-        _write_jsonl(_queue_file(), reordered)
-        return {"undone": {"type": action["type"], "item": item}}
+        _write_jsonl(_queue_file(), [item] + items)
+    elif action["type"] == "discard":
+        records = _read_jsonl(_discarded_file())
+        if not records:
+            raise HTTPException(409, "Discarded file is empty — cannot undo discard")
+        _write_jsonl(_discarded_file(), records[:-1])
+        items = _read_jsonl(_queue_file())
+        _write_jsonl(_queue_file(), [item] + items)
+    elif action["type"] == "skip":
+        items = _read_jsonl(_queue_file())
+        # Remove the item wherever it sits (guards against duplicate insertion),
+        # then prepend it to the front — restoring it to position 0.
+        items = [item] + [x for x in items if x["id"] != item["id"]]
+        _write_jsonl(_queue_file(), items)
 
-    # For label and discard: restore item to front of queue
-    items = _read_jsonl(_queue_file())
-    _write_jsonl(_queue_file(), [item] + items)
+    # Clear AFTER all file operations succeed
+    _last_action = None
     return {"undone": {"type": action["type"], "item": item}}
 
 
