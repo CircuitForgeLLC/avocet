@@ -85,3 +85,67 @@ def test_skip_moves_to_back(client, queue_with_items):
 def test_skip_unknown_id_returns_404(client, queue_with_items):
     r = client.post("/api/skip", json={"id": "nope"})
     assert r.status_code == 404
+
+
+# --- Part A: POST /api/discard ---
+
+def test_discard_writes_to_discarded_file(client, queue_with_items):
+    from app import api as api_module
+    r = client.post("/api/discard", json={"id": "id1"})
+    assert r.status_code == 200
+    discarded = api_module._read_jsonl(api_module._discarded_file())
+    assert len(discarded) == 1
+    assert discarded[0]["id"] == "id1"
+    assert discarded[0]["label"] == "__discarded__"
+
+def test_discard_removes_from_queue(client, queue_with_items):
+    from app import api as api_module
+    client.post("/api/discard", json={"id": "id1"})
+    queue = api_module._read_jsonl(api_module._queue_file())
+    assert not any(x["id"] == "id1" for x in queue)
+
+
+# --- Part B: DELETE /api/label/undo ---
+
+def test_undo_label_removes_from_score(client, queue_with_items):
+    from app import api as api_module
+    client.post("/api/label", json={"id": "id0", "label": "neutral"})
+    r = client.delete("/api/label/undo")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["undone"]["type"] == "label"
+    score = api_module._read_jsonl(api_module._score_file())
+    assert score == []
+
+def test_undo_discard_removes_from_discarded(client, queue_with_items):
+    from app import api as api_module
+    client.post("/api/discard", json={"id": "id0"})
+    r = client.delete("/api/label/undo")
+    assert r.status_code == 200
+    discarded = api_module._read_jsonl(api_module._discarded_file())
+    assert discarded == []
+
+def test_undo_skip_restores_to_front(client, queue_with_items):
+    from app import api as api_module
+    client.post("/api/skip", json={"id": "id0"})
+    r = client.delete("/api/label/undo")
+    assert r.status_code == 200
+    queue = api_module._read_jsonl(api_module._queue_file())
+    assert queue[0]["id"] == "id0"
+
+def test_undo_with_no_action_returns_404(client):
+    r = client.delete("/api/label/undo")
+    assert r.status_code == 404
+
+
+# --- Part C: GET /api/config/labels ---
+
+def test_config_labels_returns_metadata(client):
+    r = client.get("/api/config/labels")
+    assert r.status_code == 200
+    labels = r.json()
+    assert len(labels) == 10
+    assert labels[0]["key"] == "1"
+    assert "emoji" in labels[0]
+    assert "color" in labels[0]
+    assert "name" in labels[0]
