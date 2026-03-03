@@ -27,7 +27,7 @@ def client():
 
 
 @pytest.fixture
-def queue_with_items(tmp_path):
+def queue_with_items():
     """Write 3 test emails to the queue file."""
     from app import api as api_module
     items = [
@@ -35,7 +35,7 @@ def queue_with_items(tmp_path):
          "from": "test@example.com", "date": "2026-03-01", "source": "imap:test"}
         for i in range(3)
     ]
-    queue_path = tmp_path / "email_label_queue.jsonl"
+    queue_path = api_module._DATA_DIR / "email_label_queue.jsonl"
     queue_path.write_text("\n".join(json.dumps(x) for x in items) + "\n")
     return items
 
