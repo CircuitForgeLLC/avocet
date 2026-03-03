@@ -11,6 +11,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "^5.2.8",
+    "@fontsource/fraunces": "^5.2.9",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@vueuse/core": "^14.2.1",
     "@vueuse/integrations": "^14.2.1",
     "pinia": "^3.0.4",
