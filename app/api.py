@@ -88,5 +88,5 @@ def post_label(req: LabelRequest):
               "labeled_at": datetime.now(timezone.utc).isoformat()}
     _append_jsonl(_score_file(), record)
     _write_jsonl(_queue_file(), [x for x in items if x["id"] != req.id])
-    _last_action = {"type": "label", "item": record}
+    _last_action = {"type": "label", "item": match, "label": req.label}
     return {"ok": True}
