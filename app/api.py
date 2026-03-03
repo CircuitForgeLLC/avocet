@@ -90,3 +90,20 @@ def post_label(req: LabelRequest):
     _write_jsonl(_queue_file(), [x for x in items if x["id"] != req.id])
     _last_action = {"type": "label", "item": match, "label": req.label}
     return {"ok": True}
+
+
+class SkipRequest(BaseModel):
+    id: str
+
+
+@app.post("/api/skip")
+def post_skip(req: SkipRequest):
+    global _last_action
+    items = _read_jsonl(_queue_file())
+    match = next((x for x in items if x["id"] == req.id), None)
+    if not match:
+        raise HTTPException(404, f"Item {req.id!r} not found in queue")
+    reordered = [x for x in items if x["id"] != req.id] + [match]
+    _write_jsonl(_queue_file(), reordered)
+    _last_action = {"type": "skip", "item": match}
+    return {"ok": True}

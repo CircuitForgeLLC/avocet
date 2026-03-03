@@ -73,3 +73,15 @@ def test_label_removes_from_queue(client, queue_with_items):
 def test_label_unknown_id_returns_404(client, queue_with_items):
     r = client.post("/api/label", json={"id": "unknown", "label": "neutral"})
     assert r.status_code == 404
+
+def test_skip_moves_to_back(client, queue_with_items):
+    from app import api as api_module
+    r = client.post("/api/skip", json={"id": "id0"})
+    assert r.status_code == 200
+    queue = api_module._read_jsonl(api_module._queue_file())
+    assert queue[-1]["id"] == "id0"
+    assert queue[0]["id"] == "id1"
+
+def test_skip_unknown_id_returns_404(client, queue_with_items):
+    r = client.post("/api/skip", json={"id": "nope"})
+    assert r.status_code == 404
