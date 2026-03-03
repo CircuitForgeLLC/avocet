@@ -20,6 +20,12 @@ def set_data_dir(path: Path) -> None:
     _DATA_DIR = path
 
 
+def reset_last_action() -> None:
+    """Reset undo state — used by tests."""
+    global _last_action
+    _last_action = None
+
+
 def _queue_file() -> Path:
     return _DATA_DIR / "email_label_queue.jsonl"
 
@@ -41,10 +47,8 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n",
-        encoding="utf-8",
-    )
+    text = "\n".join(json.dumps(r, ensure_ascii=False) for r in records)
+    path.write_text(text + "\n" if records else "", encoding="utf-8")
 
 
 def _append_jsonl(path: Path, record: dict) -> None:
