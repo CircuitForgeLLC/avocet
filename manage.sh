@@ -269,7 +269,7 @@ case "$CMD" in
         (cd web && npm run build) >> "$API_LOG" 2>&1
         info "Starting FastAPI on port ${API_PORT}…"
         nohup "$PYTHON_UI" -m uvicorn app.api:app \
-            --host 127.0.0.1 --port "$API_PORT" \
+            --host 0.0.0.0 --port "$API_PORT" \
             >> "$API_LOG" 2>&1 &
         echo $! > "$API_PID_FILE"
         # Poll until port is actually bound (up to 10 s), not just process alive
