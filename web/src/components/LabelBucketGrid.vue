@@ -40,11 +40,11 @@ function onDrop(name: string) {
 .label-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: var(--space-2);
-  transition: all var(--bucket-expand);
+  gap: 0.5rem;
+  transition: all var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1));
 }
 
-/* Mobile: 3×3 numpad layout + hired at bottom */
+/* Mobile: 3-column numpad layout */
 @media (max-width: 480px) {
   .label-grid {
     grid-template-columns: repeat(3, 1fr);
@@ -52,67 +52,70 @@ function onDrop(name: string) {
 }
 
 .label-grid.bucket-mode {
-  gap: var(--space-4);
-  padding: var(--space-3);
+  gap: 1rem;
+  padding: 1rem;
 }
 
 .label-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-1);
-  border: 2px solid var(--label-color, var(--color-border));
-  border-radius: var(--radius-md);
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: 44px;          /* Touch target */
+  padding: 0.5rem 0.25rem;
+  border-radius: 0.5rem;
+  border: 2px solid var(--label-color, #607D8B);
   background: transparent;
-  color: var(--color-text);
+  color: var(--color-text, #1a2338);
   cursor: pointer;
-  font-family: var(--font-body);
-  transition: all var(--bucket-expand);
-  min-height: 44px;  /* touch target */
+  transition: all var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1));
+  font-family: var(--font-body, sans-serif);
 }
 
 .label-grid.bucket-mode .label-btn {
-  padding: var(--space-6) var(--space-2);
-  font-size: 1.15rem;
-}
-
-.label-btn:hover,
-.label-btn:focus-visible {
-  background: color-mix(in srgb, var(--label-color) 12%, transparent);
-}
-
-.label-btn:focus-visible {
-  outline: 2px solid var(--label-color);
-  outline-offset: 2px;
+  min-height: 80px;
+  padding: 1rem 0.5rem;
+  border-width: 3px;
+  font-size: 1.1rem;
 }
 
 .label-btn.is-drop-target {
-  background: var(--label-color);
-  color: var(--color-text-inverse, #fff);
+  background: var(--label-color, #607D8B);
+  color: #fff;
   transform: scale(1.08);
-  box-shadow: 0 0 16px color-mix(in srgb, var(--label-color) 60%, transparent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--label-color, #607D8B) 60%, transparent);
+}
+
+.label-btn:hover:not(.is-drop-target) {
+  background: color-mix(in srgb, var(--label-color, #607D8B) 12%, transparent);
 }
 
 .key-hint {
-  font-size: 0.7rem;
-  font-weight: 700;
-  opacity: 0.6;
-  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-family: var(--font-mono, monospace);
+  opacity: 0.55;
+  line-height: 1;
 }
 
-.emoji { font-size: 1.2rem; line-height: 1; }
+.emoji {
+  font-size: 1.25rem;
+  line-height: 1;
+}
 
 .label-name {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   text-align: center;
   line-height: 1.2;
   word-break: break-word;
-  color: var(--color-text-muted);
+  hyphens: auto;
 }
 
-.label-grid.bucket-mode .label-name {
-  font-size: 0.75rem;
-  color: var(--color-text);
+/* Reduced-motion fallback */
+@media (prefers-reduced-motion: reduce) {
+  .label-grid,
+  .label-btn {
+    transition: none;
+  }
 }
 </style>
