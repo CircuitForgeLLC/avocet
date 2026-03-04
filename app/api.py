@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import yaml
 from pathlib import Path
 
 from datetime import datetime, timezone
@@ -16,12 +17,25 @@ from pydantic import BaseModel
 
 _ROOT = Path(__file__).parent.parent
 _DATA_DIR: Path = _ROOT / "data"   # overridable in tests via set_data_dir()
+_CONFIG_DIR: Path | None = None    # None = use real path
 
 
 def set_data_dir(path: Path) -> None:
     """Override data directory — used by tests."""
     global _DATA_DIR
     _DATA_DIR = path
+
+
+def set_config_dir(path: Path | None) -> None:
+    """Override config directory — used by tests."""
+    global _CONFIG_DIR
+    _CONFIG_DIR = path
+
+
+def _config_file() -> Path:
+    if _CONFIG_DIR is not None:
+        return _CONFIG_DIR / "label_tool.yaml"
+    return _ROOT / "config" / "label_tool.yaml"
 
 
 def reset_last_action() -> None:
@@ -204,6 +218,31 @@ _LABEL_META = [
 @app.get("/api/config/labels")
 def get_labels():
     return _LABEL_META
+
+
+@app.get("/api/config")
+def get_config():
+    f = _config_file()
+    if not f.exists():
+        return {"accounts": [], "max_per_account": 500}
+    raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    return {"accounts": raw.get("accounts", []), "max_per_account": raw.get("max_per_account", 500)}
+
+
+class ConfigPayload(BaseModel):
+    accounts: list[dict]
+    max_per_account: int = 500
+
+
+@app.post("/api/config")
+def post_config(payload: ConfigPayload):
+    f = _config_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(yaml.dump(payload.model_dump(), allow_unicode=True, sort_keys=False),
+                   encoding="utf-8")
+    tmp.rename(f)
+    return {"ok": True}
 
 
 # Static SPA — MUST be last (catches all unmatched paths)

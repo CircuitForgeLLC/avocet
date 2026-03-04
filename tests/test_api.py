@@ -152,3 +152,58 @@ def test_config_labels_returns_metadata(client):
     assert "emoji" in labels[0]
     assert "color" in labels[0]
     assert "name" in labels[0]
+
+
+# ── /api/config ──────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def config_dir(tmp_path):
+    """Give the API a writable config directory."""
+    from app import api as api_module
+    api_module.set_config_dir(tmp_path)
+    yield tmp_path
+    api_module.set_config_dir(None)   # reset to default
+
+
+@pytest.fixture
+def data_dir():
+    """Expose the current _DATA_DIR set by the autouse reset_globals fixture."""
+    from app import api as api_module
+    return api_module._DATA_DIR
+
+
+def test_get_config_returns_empty_when_no_file(client, config_dir):
+    r = client.get("/api/config")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["accounts"] == []
+    assert data["max_per_account"] == 500
+
+
+def test_post_config_writes_yaml(client, config_dir):
+    import yaml
+    payload = {
+        "accounts": [{"name": "Test", "host": "imap.test.com", "port": 993,
+                       "use_ssl": True, "username": "u@t.com", "password": "pw",
+                       "folder": "INBOX", "days_back": 30}],
+        "max_per_account": 200,
+    }
+    r = client.post("/api/config", json=payload)
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    cfg_file = config_dir / "label_tool.yaml"
+    assert cfg_file.exists()
+    saved = yaml.safe_load(cfg_file.read_text())
+    assert saved["max_per_account"] == 200
+    assert saved["accounts"][0]["name"] == "Test"
+
+
+def test_get_config_round_trips(client, config_dir):
+    payload = {"accounts": [{"name": "R", "host": "h", "port": 993, "use_ssl": True,
+                              "username": "u", "password": "p", "folder": "INBOX",
+                              "days_back": 90}], "max_per_account": 300}
+    client.post("/api/config", json=payload)
+    r = client.get("/api/config")
+    data = r.json()
+    assert data["max_per_account"] == 300
+    assert data["accounts"][0]["name"] == "R"
