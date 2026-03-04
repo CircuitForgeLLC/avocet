@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import { router } from './router'
 // Self-hosted fonts — no Google Fonts CDN (privacy requirement)
 import '@fontsource/fraunces/400.css'
 import '@fontsource/fraunces/700.css'
@@ -11,6 +12,9 @@ import './assets/theme.css'
 import './assets/avocet.css'
 import App from './App.vue'
 
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual'
+
 const app = createApp(App)
 app.use(createPinia())
+app.use(router)
 app.mount('#app')
