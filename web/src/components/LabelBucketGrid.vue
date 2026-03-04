@@ -39,16 +39,17 @@ function onDrop(name: string) {
 <style scoped>
 .label-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.5rem;
-  transition: all var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1));
+  transition: gap var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1)),
+              padding var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1));
 }
 
-/* Mobile: 3-column numpad layout */
-@media (max-width: 480px) {
-  .label-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
+/* 10th button (hired / key h) — centered below the 3×3 like a numpad 0 */
+.label-btn:last-child {
+  grid-column: 1 / -1;
+  max-width: calc(33.333% - 0.34rem);
+  justify-self: center;
 }
 
 .label-grid.bucket-mode {
@@ -69,7 +70,14 @@ function onDrop(name: string) {
   background: transparent;
   color: var(--color-text, #1a2338);
   cursor: pointer;
-  transition: all var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1));
+  transition: min-height var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1)),
+              padding var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1)),
+              border-width var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1)),
+              font-size var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1)),
+              background var(--transition, 200ms ease),
+              transform var(--transition, 200ms ease),
+              box-shadow var(--transition, 200ms ease),
+              opacity var(--transition, 200ms ease);
   font-family: var(--font-body, sans-serif);
 }
 
