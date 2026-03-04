@@ -209,5 +209,16 @@ def get_labels():
 # Static SPA — MUST be last (catches all unmatched paths)
 _DIST = _ROOT / "web" / "dist"
 if _DIST.exists():
+    from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
+
+    # Serve index.html with no-cache so browsers always fetch fresh HTML after rebuilds.
+    # Hashed assets (/assets/index-abc123.js) can be cached forever — they change names
+    # when content changes (standard Vite cache-busting strategy).
+    _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+
+    @app.get("/")
+    def get_spa_root():
+        return FileResponse(str(_DIST / "index.html"), headers=_NO_CACHE)
+
     app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="spa")
