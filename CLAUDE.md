@@ -75,8 +75,9 @@ conda run -n job-seeker-classifiers python scripts/benchmark_classifier.py --exp
 | `survey_received` | 5 | Culture-fit survey or assessment invitation |
 | `neutral` | 6 | ATS confirmation (application received, etc.) |
 | `event_rescheduled` | 7 | Interview or event moved to a new time |
-| `unrelated` | 8 | Non-job-search email, not classifiable |
-| `digest` | 9 | Job digest or multi-listing email (scrapeable) |
+| `digest` | 8 | Job digest or multi-listing email (scrapeable) |
+| `new_lead` | 9 | Unsolicited recruiter outreach or cold contact |
+| `hired` | h | Offer accepted, onboarding, welcome email, start date |
 
 ## Model Registry (13 models, 7 defaults)
 
@@ -104,6 +105,67 @@ Add `--models deberta-small deberta-small-2pass` to test a specific subset.
   with only top-2, forcing a binary choice. 2× cost, better confidence.
 - `--compare` uses the first account in `label_tool.yaml` for live IMAP emails.
 - DB export labels are llama3.1:8b-generated — treat as noisy, not gold truth.
+
+## Vue Label UI (app/api.py + web/)
+
+FastAPI on port 8503 serves both the REST API and the built Vue SPA (`web/dist/`).
+
+```
+./manage.sh start-api    # build Vue SPA + start FastAPI (binds 0.0.0.0:8503 — LAN accessible)
+./manage.sh stop-api
+./manage.sh open-api     # xdg-open http://localhost:8503
+```
+
+Logs: `log/api.log`
+
+## Email Field Schema — IMPORTANT
+
+Two schemas exist. The normalization layer in `app/api.py` bridges them automatically.
+
+### JSONL on-disk schema (written by `label_tool.py` and `label_tool.py`'s IMAP fetch)
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `subject` | str | Email subject line |
+| `body` | str | Plain-text body, truncated at 800 chars; HTML stripped by `_strip_html()` |
+| `from_addr` | str | Sender address string (`"Name <addr>"`) |
+| `date` | str | Raw RFC 2822 date string |
+| `account` | str | Display name of the IMAP account that fetched it |
+| *(no `id`)* | — | Dedup key is MD5 of `(subject + body[:100])` — never stored on disk |
+
+### Vue API schema (returned by `GET /api/queue`, required by POST endpoints)
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | str | MD5 content hash, or stored `id` if item has one |
+| `subject` | str | Unchanged |
+| `body` | str | Unchanged |
+| `from` | str | Mapped from `from_addr` (or `from` if already present) |
+| `date` | str | Unchanged |
+| `source` | str | Mapped from `account` (or `source` if already present) |
+
+### Normalization layer (`_normalize()` in `app/api.py`)
+
+`_normalize(item)` handles the mapping and ID generation. All `GET /api/queue` responses
+pass through it. Mutating endpoints (`/api/label`, `/api/skip`, `/api/discard`) look up
+items via `_normalize(x)["id"]`, so both real data (no `id`, uses content hash) and test
+fixtures (explicit `id` field) work transparently.
+
+### Peregrine integration
+
+Peregrine's `staging.db` uses different field names again:
+
+| staging.db column | Maps to avocet JSONL field |
+|-------------------|---------------------------|
+| `subject` | `subject` |
+| `body` | `body` (may contain HTML — run through `_strip_html()` before queuing) |
+| `from_address` | `from_addr` |
+| `received_date` | `date` |
+| `account` or source context | `account` |
+
+When exporting from Peregrine's DB for avocet labeling, transform to the JSONL schema above
+(not the Vue API schema). The `--export-db` flag in `benchmark_classifier.py` does this.
+Any new export path should also call `_strip_html()` on the body before writing.
 
 ## Relationship to Peregrine
 
