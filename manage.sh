@@ -93,6 +93,11 @@ usage() {
     echo -e "    ${GREEN}score [args]${NC}             Shortcut: --score [args]"
     echo -e "    ${GREEN}compare [args]${NC}           Shortcut: --compare [args]"
     echo ""
+    echo "  Vue API:"
+    echo -e "    ${GREEN}start-api${NC}                Build Vue SPA + start FastAPI on port 8503"
+    echo -e "    ${GREEN}stop-api${NC}                 Stop FastAPI server"
+    echo -e "    ${GREEN}open-api${NC}                 Open Vue UI in browser (http://localhost:8503)"
+    echo ""
     echo "  Dev:"
     echo -e "    ${GREEN}test${NC}                     Run pytest suite"
     echo ""
@@ -249,6 +254,58 @@ case "$CMD" in
 
     compare)
         exec "$0" benchmark --compare "$@"
+        ;;
+
+    start-api)
+        API_PID_FILE=".avocet-api.pid"
+        API_PORT=8503
+        if [[ -f "$API_PID_FILE" ]] && kill -0 "$(<"$API_PID_FILE")" 2>/dev/null; then
+            warn "API already running (PID $(<"$API_PID_FILE")) → http://localhost:${API_PORT}"
+            exit 0
+        fi
+        mkdir -p "$LOG_DIR"
+        API_LOG="${LOG_DIR}/api.log"
+        info "Building Vue SPA…"
+        (cd web && npm run build) >> "$API_LOG" 2>&1
+        info "Starting FastAPI on port ${API_PORT}…"
+        nohup "$PYTHON_UI" -m uvicorn app.api:app \
+            --host 127.0.0.1 --port "$API_PORT" \
+            >> "$API_LOG" 2>&1 &
+        echo $! > "$API_PID_FILE"
+        sleep 1
+        if kill -0 "$(<"$API_PID_FILE")" 2>/dev/null; then
+            success "Avocet API started → http://localhost:${API_PORT}  (PID $(<"$API_PID_FILE"))"
+        else
+            error "API died. Check ${API_LOG}"
+        fi
+        ;;
+
+    stop-api)
+        API_PID_FILE=".avocet-api.pid"
+        if [[ ! -f "$API_PID_FILE" ]]; then
+            warn "API not running."
+            exit 0
+        fi
+        PID="$(<"$API_PID_FILE")"
+        if kill -0 "$PID" 2>/dev/null; then
+            kill "$PID" && rm -f "$API_PID_FILE"
+            success "API stopped (PID ${PID})."
+        else
+            warn "Stale PID file (process ${PID} not running). Cleaning up."
+            rm -f "$API_PID_FILE"
+        fi
+        ;;
+
+    open-api)
+        URL="http://localhost:8503"
+        info "Opening ${URL}"
+        if command -v xdg-open &>/dev/null; then
+            xdg-open "$URL"
+        elif command -v open &>/dev/null; then
+            open "$URL"
+        else
+            echo "$URL"
+        fi
         ;;
 
     help|--help|-h)
