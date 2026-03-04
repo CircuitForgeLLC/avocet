@@ -284,6 +284,51 @@ def test_account(req: AccountTestRequest):
     return {"ok": ok, "message": message, "count": count}
 
 
+from fastapi.responses import StreamingResponse
+
+
+@app.get("/api/fetch/stream")
+def fetch_stream(
+    accounts: str = Query(default=""),
+    days_back: int = Query(default=90, ge=1, le=365),
+    limit: int = Query(default=150, ge=1, le=1000),
+    mode: str = Query(default="wide"),
+):
+    from app.imap_fetch import fetch_account_stream
+
+    selected_names = {n.strip() for n in accounts.split(",") if n.strip()}
+    config = get_config()  # reuse existing endpoint logic
+    selected = [a for a in config["accounts"] if a.get("name") in selected_names]
+
+    def generate():
+        known_keys = {_item_id(x) for x in _read_jsonl(_queue_file())}
+        total_added = 0
+
+        for acc in selected:
+            try:
+                batch_emails: list[dict] = []
+                for event in fetch_account_stream(acc, days_back, limit, known_keys):
+                    if event["type"] == "done":
+                        batch_emails = event.pop("emails", [])
+                        total_added += event["added"]
+                    yield f"data: {json.dumps(event)}\n\n"
+                # Write new emails to queue after each account
+                if batch_emails:
+                    existing = _read_jsonl(_queue_file())
+                    _write_jsonl(_queue_file(), existing + batch_emails)
+            except Exception as exc:
+                error_event = {"type": "error", "account": acc.get("name", "?"),
+                               "message": str(exc)}
+                yield f"data: {json.dumps(error_event)}\n\n"
+
+        queue_size = len(_read_jsonl(_queue_file()))
+        complete = {"type": "complete", "total_added": total_added, "queue_size": queue_size}
+        yield f"data: {json.dumps(complete)}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 # Static SPA — MUST be last (catches all unmatched paths)
 _DIST = _ROOT / "web" / "dist"
 if _DIST.exists():
