@@ -211,6 +211,7 @@ async function handleSkip() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: item.id }),
   })
+  if (store.queue.length < 3) await fetchBatch()
 }
 
 async function handleDiscard() {
@@ -228,6 +229,7 @@ async function handleDiscard() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: item.id }),
   })
+  if (store.queue.length < 3) await fetchBatch()
 }
 
 async function handleUndo() {
