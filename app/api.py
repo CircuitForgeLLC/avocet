@@ -273,6 +273,17 @@ def download_stats():
     )
 
 
+class AccountTestRequest(BaseModel):
+    account: dict
+
+
+@app.post("/api/accounts/test")
+def test_account(req: AccountTestRequest):
+    from app.imap_fetch import test_connection
+    ok, message, count = test_connection(req.account)
+    return {"ok": ok, "message": message, "count": count}
+
+
 # Static SPA — MUST be last (catches all unmatched paths)
 _DIST = _ROOT / "web" / "dist"
 if _DIST.exists():
