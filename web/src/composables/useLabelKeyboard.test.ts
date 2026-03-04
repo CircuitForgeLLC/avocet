@@ -89,4 +89,18 @@ describe('useLabelKeyboard', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' }))
     expect(onLabel).not.toHaveBeenCalled()
   })
+
+  it('evaluates labels getter on each keypress', () => {
+    const labelList: { name: string; key: string; emoji: string; color: string }[] = []
+    const onLabel = vi.fn()
+    const { cleanup } = useLabelKeyboard({ labels: () => labelList, onLabel, onSkip: vi.fn(), onDiscard: vi.fn(), onUndo: vi.fn(), onHelp: vi.fn() })
+    cleanups.push(cleanup)
+    // Before labels loaded — pressing '1' does nothing
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }))
+    expect(onLabel).not.toHaveBeenCalled()
+    // Add a label (simulating async load)
+    labelList.push({ name: 'interview_scheduled', key: '1', emoji: '🗓️', color: '#4CAF50' })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }))
+    expect(onLabel).toHaveBeenCalledWith('interview_scheduled')
+  })
 })

@@ -254,7 +254,7 @@ async function handleUndo() {
 }
 
 useLabelKeyboard({
-  labels: [],   // will be updated after labels load — keyboard not active until queue loads
+  labels: () => labels.value,   // getter — evaluated on each keypress
   onLabel: handleLabel,
   onSkip: handleSkip,
   onDiscard: handleDiscard,
