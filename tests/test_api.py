@@ -207,3 +207,47 @@ def test_get_config_round_trips(client, config_dir):
     data = r.json()
     assert data["max_per_account"] == 300
     assert data["accounts"][0]["name"] == "R"
+
+
+# ── /api/stats ───────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def score_with_labels(tmp_path, data_dir):
+    """Write a score file with 3 labels for stats tests."""
+    score_path = data_dir / "email_score.jsonl"
+    records = [
+        {"id": "a", "label": "interview_scheduled"},
+        {"id": "b", "label": "interview_scheduled"},
+        {"id": "c", "label": "rejected"},
+    ]
+    score_path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+    return records
+
+
+def test_stats_returns_counts(client, score_with_labels):
+    r = client.get("/api/stats")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 3
+    assert data["counts"]["interview_scheduled"] == 2
+    assert data["counts"]["rejected"] == 1
+
+
+def test_stats_empty_when_no_file(client, data_dir):
+    r = client.get("/api/stats")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 0
+    assert data["counts"] == {}
+    assert data["score_file_bytes"] == 0
+
+
+def test_stats_download_returns_file(client, score_with_labels):
+    r = client.get("/api/stats/download")
+    assert r.status_code == 200
+    assert "jsonlines" in r.headers.get("content-type", "")
+
+
+def test_stats_download_404_when_no_file(client, data_dir):
+    r = client.get("/api/stats/download")
+    assert r.status_code == 404

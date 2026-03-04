@@ -245,6 +245,34 @@ def post_config(payload: ConfigPayload):
     return {"ok": True}
 
 
+@app.get("/api/stats")
+def get_stats():
+    records = _read_jsonl(_score_file())
+    counts: dict[str, int] = {}
+    for r in records:
+        lbl = r.get("label", "")
+        if lbl:
+            counts[lbl] = counts.get(lbl, 0) + 1
+    return {
+        "total": len(records),
+        "counts": counts,
+        "score_file_bytes": _score_file().stat().st_size if _score_file().exists() else 0,
+    }
+
+
+@app.get("/api/stats/download")
+def download_stats():
+    from fastapi.responses import FileResponse
+    if not _score_file().exists():
+        raise HTTPException(404, "No score file")
+    return FileResponse(
+        str(_score_file()),
+        filename="email_score.jsonl",
+        media_type="application/jsonlines",
+        headers={"Content-Disposition": 'attachment; filename="email_score.jsonl"'},
+    )
+
+
 # Static SPA — MUST be last (catches all unmatched paths)
 _DIST = _ROOT / "web" / "dist"
 if _DIST.exists():
