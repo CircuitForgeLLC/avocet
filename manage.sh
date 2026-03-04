@@ -272,11 +272,20 @@ case "$CMD" in
             --host 127.0.0.1 --port "$API_PORT" \
             >> "$API_LOG" 2>&1 &
         echo $! > "$API_PID_FILE"
-        sleep 1
-        if kill -0 "$(<"$API_PID_FILE")" 2>/dev/null; then
-            success "Avocet API started → http://localhost:${API_PORT}  (PID $(<"$API_PID_FILE"))"
-        else
-            error "API died. Check ${API_LOG}"
+        # Poll until port is actually bound (up to 10 s), not just process alive
+        for _i in $(seq 1 20); do
+            sleep 0.5
+            if (echo "" >/dev/tcp/127.0.0.1/"$API_PORT") 2>/dev/null; then
+                success "Avocet API started → http://localhost:${API_PORT}  (PID $(<"$API_PID_FILE"))"
+                break
+            fi
+            if ! kill -0 "$(<"$API_PID_FILE")" 2>/dev/null; then
+                rm -f "$API_PID_FILE"
+                error "API died during startup. Check ${API_LOG}"
+            fi
+        done
+        if ! (echo "" >/dev/tcp/127.0.0.1/"$API_PORT") 2>/dev/null; then
+            error "API did not bind to port ${API_PORT} within 10 s. Check ${API_LOG}"
         fi
         ;;
 
