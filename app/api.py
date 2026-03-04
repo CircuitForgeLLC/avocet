@@ -5,6 +5,7 @@ Endpoints and static file serving are added in subsequent tasks.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -60,6 +61,29 @@ def _append_jsonl(path: Path, record: dict) -> None:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def _item_id(item: dict) -> str:
+    """Stable content-hash ID — matches label_tool.py _entry_key dedup logic."""
+    key = (item.get("subject", "") + (item.get("body", "") or "")[:100])
+    return hashlib.md5(key.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _normalize(item: dict) -> dict:
+    """Normalize JSONL item to the Vue frontend schema.
+
+    label_tool.py stores: subject, body, from_addr, date, account (no id).
+    The Vue app expects: id, subject, body, from, date, source.
+    Both old (from_addr/account) and new (from/source) field names are handled.
+    """
+    return {
+        "id":      item.get("id") or _item_id(item),
+        "subject": item.get("subject", ""),
+        "body":    item.get("body", ""),
+        "from":    item.get("from") or item.get("from_addr", ""),
+        "date":    item.get("date", ""),
+        "source":  item.get("source") or item.get("account", ""),
+    }
+
+
 app = FastAPI(title="Avocet API")
 
 # In-memory last-action store (single user, local tool — in-memory is fine)
@@ -69,7 +93,7 @@ _last_action: dict | None = None
 @app.get("/api/queue")
 def get_queue(limit: int = Query(default=10, ge=1, le=50)):
     items = _read_jsonl(_queue_file())
-    return {"items": items[:limit], "total": len(items)}
+    return {"items": [_normalize(x) for x in items[:limit]], "total": len(items)}
 
 
 class LabelRequest(BaseModel):
@@ -81,13 +105,13 @@ class LabelRequest(BaseModel):
 def post_label(req: LabelRequest):
     global _last_action
     items = _read_jsonl(_queue_file())
-    match = next((x for x in items if x["id"] == req.id), None)
+    match = next((x for x in items if _normalize(x)["id"] == req.id), None)
     if not match:
         raise HTTPException(404, f"Item {req.id!r} not found in queue")
     record = {**match, "label": req.label,
               "labeled_at": datetime.now(timezone.utc).isoformat()}
     _append_jsonl(_score_file(), record)
-    _write_jsonl(_queue_file(), [x for x in items if x["id"] != req.id])
+    _write_jsonl(_queue_file(), [x for x in items if _normalize(x)["id"] != req.id])
     _last_action = {"type": "label", "item": match, "label": req.label}
     return {"ok": True}
 
@@ -100,10 +124,10 @@ class SkipRequest(BaseModel):
 def post_skip(req: SkipRequest):
     global _last_action
     items = _read_jsonl(_queue_file())
-    match = next((x for x in items if x["id"] == req.id), None)
+    match = next((x for x in items if _normalize(x)["id"] == req.id), None)
     if not match:
         raise HTTPException(404, f"Item {req.id!r} not found in queue")
-    reordered = [x for x in items if x["id"] != req.id] + [match]
+    reordered = [x for x in items if _normalize(x)["id"] != req.id] + [match]
     _write_jsonl(_queue_file(), reordered)
     _last_action = {"type": "skip", "item": match}
     return {"ok": True}
@@ -117,14 +141,14 @@ class DiscardRequest(BaseModel):
 def post_discard(req: DiscardRequest):
     global _last_action
     items = _read_jsonl(_queue_file())
-    match = next((x for x in items if x["id"] == req.id), None)
+    match = next((x for x in items if _normalize(x)["id"] == req.id), None)
     if not match:
         raise HTTPException(404, f"Item {req.id!r} not found in queue")
     record = {**match, "label": "__discarded__",
               "discarded_at": datetime.now(timezone.utc).isoformat()}
     _append_jsonl(_discarded_file(), record)
-    _write_jsonl(_queue_file(), [x for x in items if x["id"] != req.id])
-    _last_action = {"type": "discard", "item": match}   # store ORIGINAL match, not enriched record
+    _write_jsonl(_queue_file(), [x for x in items if _normalize(x)["id"] != req.id])
+    _last_action = {"type": "discard", "item": match}
     return {"ok": True}
 
 
@@ -153,14 +177,13 @@ def delete_undo():
         _write_jsonl(_queue_file(), [item] + items)
     elif action["type"] == "skip":
         items = _read_jsonl(_queue_file())
-        # Remove the item wherever it sits (guards against duplicate insertion),
-        # then prepend it to the front — restoring it to position 0.
-        items = [item] + [x for x in items if x["id"] != item["id"]]
+        item_id = _normalize(item)["id"]
+        items = [item] + [x for x in items if _normalize(x)["id"] != item_id]
         _write_jsonl(_queue_file(), items)
 
     # Clear AFTER all file operations succeed
     _last_action = None
-    return {"undone": {"type": action["type"], "item": item}}
+    return {"undone": {"type": action["type"], "item": _normalize(item)}}
 
 
 # Label metadata — 10 labels matching label_tool.py
