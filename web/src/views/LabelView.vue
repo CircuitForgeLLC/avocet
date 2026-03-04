@@ -6,9 +6,12 @@
         <template v-if="store.totalRemaining > 0">
           {{ store.totalRemaining }} remaining
         </template>
-        <span v-if="onRoll"    class="badge badge-roll">🔥 On a roll!</span>
-        <span v-if="speedRound" class="badge badge-speed">⚡ Speed round!</span>
-        <span v-if="fiftyDeep" class="badge badge-fifty">🎯 Fifty deep!</span>
+        <span v-if="onRoll"         class="badge badge-roll">🔥 On a roll!</span>
+        <span v-if="speedRound"     class="badge badge-speed">⚡ Speed round!</span>
+        <span v-if="fiftyDeep"      class="badge badge-fifty">🎯 Fifty deep!</span>
+        <span v-if="centuryMark"    class="badge badge-century">💯 Century!</span>
+        <span v-if="cleanSweep"     class="badge badge-sweep">🧹 Clean sweep!</span>
+        <span v-if="midnightLabeler" class="badge badge-midnight">🦉 Midnight labeler!</span>
       </span>
       <div class="header-actions">
         <button @click="handleUndo"    :disabled="!store.lastAction" class="btn-action">↩ Undo</button>
@@ -61,12 +64,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useLabelStore } from '../stores/label'
 import { useApiFetch } from '../composables/useApi'
 import { useHaptics } from '../composables/useHaptics'
 import { useMotion } from '../composables/useMotion'
 import { useLabelKeyboard } from '../composables/useLabelKeyboard'
+import { fireConfetti, useCursorTrail } from '../composables/useEasterEgg'
 import EmailCardStack from '../components/EmailCardStack.vue'
 import LabelBucketGrid from '../components/LabelBucketGrid.vue'
 import UndoToast from '../components/UndoToast.vue'
@@ -88,6 +92,24 @@ const onRoll    = ref(false)
 const speedRound = ref(false)
 const fiftyDeep  = ref(false)
 
+// New easter egg state
+const centuryMark    = ref(false)
+const cleanSweep     = ref(false)
+const midnightLabeler = ref(false)
+let midnightShownThisSession = false
+let trailCleanup: (() => void) | null = null
+let themeObserver: MutationObserver | null = null
+
+function syncCursorTrail() {
+  const isHacker = document.documentElement.dataset.theme === 'hacker'
+  if (isHacker && !trailCleanup) {
+    trailCleanup = useCursorTrail()
+  } else if (!isHacker && trailCleanup) {
+    trailCleanup()
+    trailCleanup = null
+  }
+}
+
 async function fetchBatch() {
   loading.value = true
   apiError.value = false
@@ -96,6 +118,12 @@ async function fetchBatch() {
   if (error || !data) { apiError.value = true; return }
   store.queue = data.items
   store.totalRemaining = data.total
+
+  // Clean sweep — queue exhausted in this batch
+  if (data.total === 0 && data.items.length === 0 && store.sessionLabeled > 0) {
+    cleanSweep.value = true
+    setTimeout(() => { cleanSweep.value = false }, 4000)
+  }
 }
 
 function checkSpeedRound(): boolean {
@@ -136,6 +164,27 @@ async function handleLabel(name: string) {
     onRoll.value = false
     speedRound.value = true
     setTimeout(() => { speedRound.value = false }, 2500)
+  }
+
+  // Hired confetti
+  if (name === 'hired') {
+    fireConfetti()
+  }
+
+  // Century mark
+  if (store.sessionLabeled === 100) {
+    centuryMark.value = true
+    setTimeout(() => { centuryMark.value = false }, 4000)
+  }
+
+  // Midnight labeler — once per session
+  if (!midnightShownThisSession) {
+    const h = new Date().getHours()
+    if (h >= 0 && h < 3) {
+      midnightShownThisSession = true
+      midnightLabeler.value = true
+      setTimeout(() => { midnightLabeler.value = false }, 5000)
+    }
   }
 
   await useApiFetch('/api/label', {
@@ -207,6 +256,20 @@ onMounted(async () => {
   const { data } = await useApiFetch<any[]>('/api/config/labels')
   if (data) labels.value = data
   await fetchBatch()
+
+  // Cursor trail — activate immediately if already in hacker mode, then watch for changes
+  syncCursorTrail()
+  themeObserver = new MutationObserver(syncCursorTrail)
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+})
+
+onUnmounted(() => {
+  themeObserver?.disconnect()
+  themeObserver = null
+  if (trailCleanup) {
+    trailCleanup()
+    trailCleanup = null
+  }
 })
 </script>
 
@@ -253,9 +316,12 @@ onMounted(async () => {
   to   { transform: scale(1);   opacity: 1; }
 }
 
-.badge-roll  { background: #ff6b35; color: #fff; }
-.badge-speed { background: #7c3aed; color: #fff; }
-.badge-fifty { background: var(--app-accent, #B8622A); color: var(--app-accent-text, #1a2338); }
+.badge-roll    { background: #ff6b35; color: #fff; }
+.badge-speed   { background: #7c3aed; color: #fff; }
+.badge-fifty   { background: var(--app-accent, #B8622A); color: var(--app-accent-text, #1a2338); }
+.badge-century { background: #ffd700; color: #1a2338; }
+.badge-sweep   { background: var(--app-primary, #2A6080); color: #fff; }
+.badge-midnight { background: #1a1a2e; color: #7c9dcf; border: 1px solid #7c9dcf; }
 
 .header-actions {
   display: flex;
