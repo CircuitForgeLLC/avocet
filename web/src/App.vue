@@ -1,14 +1,18 @@
 <template>
   <div id="app" :class="{ 'rich-motion': motion.rich.value }">
-    <LabelView />
+    <AppSidebar />
+    <main class="app-main">
+      <RouterView />
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
+import { RouterView } from 'vue-router'
 import { useMotion } from './composables/useMotion'
 import { useHackerMode } from './composables/useEasterEgg'
-import LabelView from './views/LabelView.vue'
+import AppSidebar from './components/AppSidebar.vue'
 
 const motion = useMotion()
 const { restore } = useHackerMode()
@@ -34,6 +38,15 @@ body {
 }
 
 #app {
+  display: flex;
   min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;  /* prevent flex blowout */
+  margin-left: var(--sidebar-width, 200px);
+  transition: margin-left 250ms ease;
 }
 </style>

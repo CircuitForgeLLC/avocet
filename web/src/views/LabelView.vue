@@ -1,11 +1,5 @@
 <template>
   <div class="label-view">
-    <!-- App bar -->
-    <div class="app-bar">
-      <span class="app-title">Avocet</span>
-      <span class="app-subtitle">Email Labeler</span>
-    </div>
-
     <!-- Header bar -->
     <header class="lv-header">
       <span class="queue-count">
@@ -296,28 +290,6 @@ onUnmounted(() => {
   max-width: 640px;
   margin: 0 auto;
   min-height: 100dvh;
-}
-
-.app-bar {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding-bottom: 0.25rem;
-  border-bottom: 2px solid var(--color-border, #d0d7e8);
-}
-
-.app-title {
-  font-family: var(--font-display, var(--font-body, sans-serif));
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: var(--app-primary, #2A6080);
-  letter-spacing: -0.02em;
-}
-
-.app-subtitle {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary, #6b7a99);
-  font-family: var(--font-mono, monospace);
 }
 
 .queue-status {
