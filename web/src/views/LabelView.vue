@@ -1,11 +1,19 @@
 <template>
   <div class="label-view">
+    <!-- App bar -->
+    <div class="app-bar">
+      <span class="app-title">Avocet</span>
+      <span class="app-subtitle">Email Labeler</span>
+    </div>
+
     <!-- Header bar -->
     <header class="lv-header">
       <span class="queue-count">
-        <template v-if="store.totalRemaining > 0">
+        <span v-if="loading" class="queue-status">Loading…</span>
+        <template v-else-if="store.totalRemaining > 0">
           {{ store.totalRemaining }} remaining
         </template>
+        <span v-else class="queue-status">Queue empty</span>
         <span v-if="onRoll"         class="badge badge-roll">🔥 On a roll!</span>
         <span v-if="speedRound"     class="badge badge-speed">⚡ Speed round!</span>
         <span v-if="fiftyDeep"      class="badge badge-fifty">🎯 Fifty deep!</span>
@@ -59,6 +67,7 @@
       v-if="store.lastAction"
       :action="store.lastAction"
       @undo="handleUndo"
+      @expire="store.clearLastAction()"
     />
   </div>
 </template>
@@ -115,7 +124,10 @@ async function fetchBatch() {
   apiError.value = false
   const { data, error } = await useApiFetch<{ items: any[]; total: number }>('/api/queue?limit=10')
   loading.value = false
-  if (error || !data) { apiError.value = true; return }
+  if (error || !data) {
+    apiError.value = true
+    return
+  }
   store.queue = data.items
   store.totalRemaining = data.total
 
@@ -284,6 +296,33 @@ onUnmounted(() => {
   max-width: 640px;
   margin: 0 auto;
   min-height: 100dvh;
+}
+
+.app-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 2px solid var(--color-border, #d0d7e8);
+}
+
+.app-title {
+  font-family: var(--font-display, var(--font-body, sans-serif));
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--app-primary, #2A6080);
+  letter-spacing: -0.02em;
+}
+
+.app-subtitle {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7a99);
+  font-family: var(--font-mono, monospace);
+}
+
+.queue-status {
+  opacity: 0.6;
+  font-style: italic;
 }
 
 .lv-header {

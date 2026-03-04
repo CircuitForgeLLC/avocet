@@ -13,7 +13,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import type { LastAction } from '../stores/label'
 
 const props = defineProps<{ action: LastAction }>()
-defineEmits<{ undo: [] }>()
+const emit = defineEmits<{ undo: []; expire: [] }>()
 
 const DURATION = 5000
 const elapsed  = ref(0)
@@ -30,14 +30,15 @@ const label = computed(() => {
 })
 
 function tick(ts: number) {
-  if (!start) start = ts
   elapsed.value = ts - start
   if (elapsed.value < DURATION) {
     raf = requestAnimationFrame(tick)
+  } else {
+    emit('expire')
   }
 }
 
-onMounted(()   => { raf = requestAnimationFrame(tick) })
+onMounted(() => { start = performance.now(); raf = requestAnimationFrame(tick) })
 onUnmounted(() => cancelAnimationFrame(raf))
 </script>
 
