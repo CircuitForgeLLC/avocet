@@ -49,11 +49,13 @@
         />
       </div>
 
-      <LabelBucketGrid
-        :labels="labels"
-        :is-bucket-mode="isDragging"
-        @label="handleLabel"
-      />
+      <div class="bucket-grid-footer">
+        <LabelBucketGrid
+          :labels="labels"
+          :is-bucket-mode="isDragging"
+          @label="handleLabel"
+        />
+      </div>
     </template>
 
     <!-- Undo toast -->
@@ -393,5 +395,18 @@ onUnmounted(() => {
 
 .card-stack-wrapper {
   flex: 1;
+  /* Give bottom breathing room so grid doesn't overlap content */
+  padding-bottom: 0.5rem;
+}
+
+/* Bucket grid stays pinned to the bottom of the viewport while the email card
+   can be scrolled freely. "hired" (10th button) may clip on very small screens
+   — that is intentional per design. */
+.bucket-grid-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--color-bg, var(--color-surface, #f0f4fc));
+  padding: 0.5rem 0 0.75rem;
+  z-index: 10;
 }
 </style>
