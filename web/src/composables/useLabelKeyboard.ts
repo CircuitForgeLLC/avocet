@@ -3,7 +3,7 @@ import { onUnmounted, getCurrentInstance } from 'vue'
 interface Label { name: string; key: string; emoji: string; color: string }
 
 interface Options {
-  labels: Label[]
+  labels: Label[] | (() => Label[])
   onLabel:   (name: string) => void
   onSkip:    () => void
   onDiscard: () => void
@@ -12,12 +12,13 @@ interface Options {
 }
 
 export function useLabelKeyboard(opts: Options) {
-  const keyMap = new Map(opts.labels.map(l => [l.key.toLowerCase(), l.name]))
-
   function handler(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement) return
     if (e.target instanceof HTMLTextAreaElement) return
     const k = e.key.toLowerCase()
+    // Evaluate labels lazily so reactive updates work
+    const labelList = typeof opts.labels === 'function' ? opts.labels() : opts.labels
+    const keyMap = new Map(labelList.map(l => [l.key.toLowerCase(), l.name]))
     if (keyMap.has(k))  { opts.onLabel(keyMap.get(k)!); return }
     if (k === 'h')      { opts.onLabel('hired');         return }
     if (k === 's')      { opts.onSkip();                 return }
