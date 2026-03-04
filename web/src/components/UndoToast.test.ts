@@ -71,4 +71,19 @@ describe('UndoToast', () => {
     const w = mount(UndoToast, { props: { action: labelAction } })
     expect(w.find('[role="status"]').exists()).toBe(true)
   })
+
+  it('emits expire when tick fires with timestamp beyond DURATION', async () => {
+    let capturedTick: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => {
+      capturedTick = fn
+      return 1
+    })
+    vi.spyOn(performance, 'now').mockReturnValue(0)
+    const w = mount(UndoToast, { props: { action: labelAction } })
+    await import('vue').then(v => v.nextTick())
+    // Simulate a tick timestamp 6 seconds in — beyond the 5-second DURATION
+    if (capturedTick) capturedTick(6000)
+    await import('vue').then(v => v.nextTick())
+    expect(w.emitted('expire')).toBeTruthy()
+  })
 })
