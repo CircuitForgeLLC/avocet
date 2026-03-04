@@ -1,6 +1,7 @@
 <template>
   <div
     class="card-stack"
+    :class="{ 'bucket-mode': isBucketMode && motion.rich.value }"
     ref="stackEl"
     :draggable="motion.rich.value"
     @dragstart="onDragStart"
@@ -86,7 +87,37 @@ const cardStyle = computed(() => {
   }
 })
 
-function onDragStart() { emit('drag-start') }
+function onDragStart(e: DragEvent) {
+  if (motion.rich.value && e.dataTransfer) {
+    // Custom drag ghost: small crumpled-paper ball
+    const ghost = document.createElement('div')
+    ghost.setAttribute('aria-hidden', 'true')
+    Object.assign(ghost.style, {
+      position: 'fixed',
+      top: '-200px',
+      left: '0',
+      width: '80px',
+      height: '80px',
+      borderRadius: '50%',
+      background: '#e4ebf5',
+      border: '3px solid #2A6080',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '1.75rem',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+      transform: 'rotate(-5deg)',
+    })
+    ghost.textContent = '✉️'
+    document.body.appendChild(ghost)
+    e.dataTransfer.setDragImage(ghost, 40, 40)
+    // Remove after browser captures — RAF is too fast, 0ms timeout works
+    setTimeout(() => {
+      if (document.body.contains(ghost)) document.body.removeChild(ghost)
+    }, 0)
+  }
+  emit('drag-start')
+}
 function onDragEnd()   { emit('drag-end')   }
 </script>
 
@@ -94,6 +125,32 @@ function onDragEnd()   { emit('drag-end')   }
 .card-stack {
   position: relative;
   min-height: 200px;
+  max-height: 2000px;  /* effectively unlimited — needed for max-height transition */
+  overflow: hidden;
+  transition:
+    max-height 280ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    min-height 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Bucket mode: collapse card stack to a small pill so buckets get more room */
+.card-stack.bucket-mode {
+  min-height: 0;
+  max-height: 90px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.card-stack.bucket-mode .card-shadow {
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.card-stack.bucket-mode .card-wrapper {
+  transform: scale(0.25) rotate(-4deg);
+  transform-origin: top center;
+  border-radius: 50% !important;
+  pointer-events: none;
 }
 
 .card-shadow {
@@ -102,6 +159,7 @@ function onDragEnd()   { emit('drag-end')   }
   border-radius: var(--radius-card, 1rem);
   background: var(--color-surface-raised, #fff);
   border: 1px solid var(--color-border, #e0e4ed);
+  transition: opacity 180ms ease;
 }
 .card-shadow-1 { transform: translateY(8px) scale(0.97); opacity: 0.6; }
 .card-shadow-2 { transform: translateY(16px) scale(0.94); opacity: 0.35; }
@@ -112,16 +170,22 @@ function onDragEnd()   { emit('drag-end')   }
   border-radius: var(--radius-card, 1rem);
   background: var(--color-surface-raised, #fff);
   will-change: transform, opacity;
+  transition:
+    transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    border-radius 280ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 280ms ease;
 }
 
-/* Dismissal animations — only active under .rich-motion on root */
-:global(.rich-motion) .card-wrapper.dismiss-label {
+/* Dismissal animations — dismiss class is only applied during the motion.rich await window,
+   so no ancestor guard needed; :global(.rich-motion) was being miscompiled by Vue's scoped
+   CSS transformer (dropping the descendant selector entirely). */
+.card-wrapper.dismiss-label {
   animation: fileAway var(--card-dismiss, 350ms ease-in) forwards;
 }
-:global(.rich-motion) .card-wrapper.dismiss-discard {
+.card-wrapper.dismiss-discard {
   animation: crumple var(--card-dismiss, 350ms ease-in) forwards;
 }
-:global(.rich-motion) .card-wrapper.dismiss-skip {
+.card-wrapper.dismiss-skip {
   animation: slideUnder var(--card-skip, 300ms ease-out) forwards;
 }
 
@@ -134,5 +198,12 @@ function onDragEnd()   { emit('drag-end')   }
 }
 @keyframes slideUnder {
   to { transform: translateX(110%) rotate(5deg); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-stack,
+  .card-stack.bucket-mode .card-wrapper {
+    transition: none;
+  }
 }
 </style>
