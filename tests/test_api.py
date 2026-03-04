@@ -276,3 +276,52 @@ def test_account_test_success(client):
     data = r.json()
     assert data["ok"] is True
     assert data["count"] == 99
+
+
+# ── /api/fetch/stream (SSE) ──────────────────────────────────────────────────
+
+def _parse_sse(content: bytes) -> list[dict]:
+    """Parse SSE response body into list of event dicts."""
+    events = []
+    for line in content.decode().splitlines():
+        if line.startswith("data: "):
+            events.append(json.loads(line[6:]))
+    return events
+
+
+def test_fetch_stream_no_accounts_configured(client, config_dir):
+    """With no config, stream should immediately complete with 0 added."""
+    r = client.get("/api/fetch/stream?accounts=NoSuchAccount&days_back=30&limit=10")
+    assert r.status_code == 200
+    events = _parse_sse(r.content)
+    complete = next((e for e in events if e["type"] == "complete"), None)
+    assert complete is not None
+    assert complete["total_added"] == 0
+
+
+def test_fetch_stream_with_mock_imap(client, config_dir, data_dir):
+    """With one configured account, stream should yield start/done/complete events."""
+    import yaml
+    from unittest.mock import MagicMock, patch
+
+    # Write a config with one account
+    cfg = {"accounts": [{"name": "Mock", "host": "h", "port": 993, "use_ssl": True,
+                          "username": "u", "password": "p", "folder": "INBOX",
+                          "days_back": 30}], "max_per_account": 50}
+    (config_dir / "label_tool.yaml").write_text(yaml.dump(cfg))
+
+    raw_msg = (b"Subject: Interview\r\nFrom: a@b.com\r\n"
+               b"Date: Mon, 1 Mar 2026 12:00:00 +0000\r\n\r\nBody")
+    mock_conn = MagicMock()
+    mock_conn.search.return_value = ("OK", [b"1"])
+    mock_conn.fetch.return_value = ("OK", [(b"1 (RFC822 {N})", raw_msg)])
+
+    with patch("app.imap_fetch.imaplib.IMAP4_SSL", return_value=mock_conn):
+        r = client.get("/api/fetch/stream?accounts=Mock&days_back=30&limit=50")
+
+    assert r.status_code == 200
+    events = _parse_sse(r.content)
+    types = [e["type"] for e in events]
+    assert "start" in types
+    assert "done" in types
+    assert "complete" in types
