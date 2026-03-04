@@ -251,3 +251,28 @@ def test_stats_download_returns_file(client, score_with_labels):
 def test_stats_download_404_when_no_file(client, data_dir):
     r = client.get("/api/stats/download")
     assert r.status_code == 404
+
+
+# ── /api/accounts/test ───────────────────────────────────────────────────────
+
+def test_account_test_missing_fields(client):
+    r = client.post("/api/accounts/test", json={"account": {"host": "", "username": "", "password": ""}})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert "required" in data["message"].lower()
+
+
+def test_account_test_success(client):
+    from unittest.mock import MagicMock, patch
+    mock_conn = MagicMock()
+    mock_conn.select.return_value = ("OK", [b"99"])
+    with patch("app.imap_fetch.imaplib.IMAP4_SSL", return_value=mock_conn):
+        r = client.post("/api/accounts/test", json={"account": {
+            "host": "imap.example.com", "port": 993, "use_ssl": True,
+            "username": "u@example.com", "password": "pw", "folder": "INBOX",
+        }})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["count"] == 99
