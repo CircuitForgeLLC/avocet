@@ -4,14 +4,12 @@
       v-for="label in labels"
       :key="label.key"
       data-testid="label-btn"
+      :data-label-key="label.name"
       class="label-btn"
-      :class="{ 'is-drop-target': dragOverLabel === label.name }"
+      :class="{ 'is-drop-target': props.hoveredBucket === label.name }"
       :style="{ '--label-color': label.color }"
       :aria-label="`Label as ${label.name.replace(/_/g, ' ')} (key: ${label.key})`"
       @click="$emit('label', label.name)"
-      @dragover.prevent="dragOverLabel = label.name"
-      @dragleave="dragOverLabel = null"
-      @drop.prevent="onDrop(label.name)"
     >
       <span class="key-hint" aria-hidden="true">{{ label.key }}</span>
       <span class="emoji" aria-hidden="true">{{ label.emoji }}</span>
@@ -21,19 +19,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-
 interface Label { name: string; emoji: string; color: string; key: string }
 
-const props = defineProps<{ labels: Label[]; isBucketMode: boolean }>()
-const emit  = defineEmits<{ label: [name: string] }>()
-
-const dragOverLabel = ref<string | null>(null)
-
-function onDrop(name: string) {
-  dragOverLabel.value = null
-  emit('label', name)
-}
+const props = defineProps<{
+  labels: Label[]
+  isBucketMode: boolean
+  hoveredBucket?: string | null
+}>()
+const emit = defineEmits<{ label: [name: string] }>()
 </script>
 
 <style scoped>

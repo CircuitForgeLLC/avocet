@@ -31,4 +31,22 @@ describe('LabelBucketGrid', () => {
     expect(btn.text()).toContain('1')
     expect(btn.text()).toContain('🗓️')
   })
+
+  it('marks button as drop-target when hoveredBucket matches label name', () => {
+    const w = mount(LabelBucketGrid, {
+      props: { labels, isBucketMode: true, hoveredBucket: 'interview_scheduled' },
+    })
+    const btns = w.findAll('[data-testid="label-btn"]')
+    expect(btns[0].classes()).toContain('is-drop-target')
+    expect(btns[1].classes()).not.toContain('is-drop-target')
+  })
+
+  it('no button marked as drop-target when hoveredBucket is null', () => {
+    const w = mount(LabelBucketGrid, {
+      props: { labels, isBucketMode: false, hoveredBucket: null },
+    })
+    w.findAll('[data-testid="label-btn"]').forEach(btn => {
+      expect(btn.classes()).not.toContain('is-drop-target')
+    })
+  })
 })
