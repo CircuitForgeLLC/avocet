@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import EmailCardStack from './EmailCardStack.vue'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 const item = {
   id: 'abc',
@@ -45,15 +45,70 @@ describe('EmailCardStack', () => {
     expect(wrapperClasses).not.toContain('dismiss-skip')
   })
 
-  it('emits drag-start on dragstart event', async () => {
+  // JSDOM doesn't implement setPointerCapture — mock it on the element.
+  // Also use dispatchEvent(new PointerEvent) directly because @vue/test-utils
+  // .trigger() tries to assign clientX on a MouseEvent (read-only in JSDOM).
+  function mockPointerCapture(element: Element) {
+    ;(element as any).setPointerCapture = vi.fn()
+    ;(element as any).releasePointerCapture = vi.fn()
+  }
+
+  function fire(element: Element, type: string, init: PointerEventInit) {
+    element.dispatchEvent(new PointerEvent(type, { bubbles: true, ...init }))
+  }
+
+  it('emits drag-start on pointerdown', async () => {
     const w = mount(EmailCardStack, { props: { item, isBucketMode: false } })
-    await w.find('.card-stack').trigger('dragstart')
+    const el = w.find('.card-wrapper').element
+    mockPointerCapture(el)
+    fire(el, 'pointerdown', { pointerId: 1, clientX: 200, clientY: 300 })
+    await w.vm.$nextTick()
     expect(w.emitted('drag-start')).toBeTruthy()
   })
 
-  it('emits drag-end on dragend event', async () => {
+  it('emits drag-end on pointerup', async () => {
     const w = mount(EmailCardStack, { props: { item, isBucketMode: false } })
-    await w.find('.card-stack').trigger('dragend')
+    const el = w.find('.card-wrapper').element
+    mockPointerCapture(el)
+    fire(el, 'pointerdown', { pointerId: 1, clientX: 200, clientY: 300 })
+    fire(el, 'pointerup',   { pointerId: 1, clientX: 200, clientY: 300 })
+    await w.vm.$nextTick()
     expect(w.emitted('drag-end')).toBeTruthy()
+  })
+
+  it('emits discard when released in left zone (x < 7% viewport)', async () => {
+    const w = mount(EmailCardStack, { props: { item, isBucketMode: false } })
+    const el = w.find('.card-wrapper').element
+    mockPointerCapture(el)
+    // JSDOM window.innerWidth defaults to 1024; 7% = 71.7px
+    fire(el, 'pointerdown', { pointerId: 1, clientX: 512, clientY: 300 })
+    fire(el, 'pointermove', { pointerId: 1, clientX: 30,  clientY: 300 })
+    fire(el, 'pointerup',   { pointerId: 1, clientX: 30,  clientY: 300 })
+    await w.vm.$nextTick()
+    expect(w.emitted('discard')).toBeTruthy()
+  })
+
+  it('emits skip when released in right zone (x > 93% viewport)', async () => {
+    const w = mount(EmailCardStack, { props: { item, isBucketMode: false } })
+    const el = w.find('.card-wrapper').element
+    mockPointerCapture(el)
+    // JSDOM window.innerWidth defaults to 1024; 93% = 952px
+    fire(el, 'pointerdown', { pointerId: 1, clientX: 512,  clientY: 300 })
+    fire(el, 'pointermove', { pointerId: 1, clientX: 1000, clientY: 300 })
+    fire(el, 'pointerup',   { pointerId: 1, clientX: 1000, clientY: 300 })
+    await w.vm.$nextTick()
+    expect(w.emitted('skip')).toBeTruthy()
+  })
+
+  it('does not emit action on pointerup without movement past zone', async () => {
+    const w = mount(EmailCardStack, { props: { item, isBucketMode: false } })
+    const el = w.find('.card-wrapper').element
+    mockPointerCapture(el)
+    fire(el, 'pointerdown', { pointerId: 1, clientX: 512, clientY: 300 })
+    fire(el, 'pointerup',   { pointerId: 1, clientX: 512, clientY: 300 })
+    await w.vm.$nextTick()
+    expect(w.emitted('discard')).toBeFalsy()
+    expect(w.emitted('skip')).toBeFalsy()
+    expect(w.emitted('label')).toBeFalsy()
   })
 })
