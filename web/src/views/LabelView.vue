@@ -314,7 +314,8 @@ onUnmounted(() => {
   padding: 1rem;
   max-width: 640px;
   margin: 0 auto;
-  min-height: 100dvh;
+  height: 100dvh;   /* hard cap — prevents grid from drifting below fold */
+  overflow: hidden;
 }
 
 .queue-status {
@@ -418,7 +419,8 @@ onUnmounted(() => {
 
 .card-stack-wrapper {
   flex: 1;
-  /* Give bottom breathing room so grid doesn't overlap content */
+  min-height: 0;   /* allow flex child to shrink — default auto prevents this */
+  overflow-y: auto;
   padding-bottom: 0.5rem;
 }
 
@@ -426,8 +428,6 @@ onUnmounted(() => {
    can be scrolled freely. "hired" (10th button) may clip on very small screens
    — that is intentional per design. */
 .bucket-grid-footer {
-  position: sticky;
-  bottom: 0;
   background: var(--color-bg, var(--color-surface, #f0f4fc));
   padding: 0.5rem 0 0.75rem;
   z-index: 10;
