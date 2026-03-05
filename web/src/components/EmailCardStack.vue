@@ -230,6 +230,7 @@ const cardStyle = computed(() => {
   display: flex;
   justify-content: center;
   align-items: flex-start;
+  overflow: visible; /* ball must escape the collapsed stack bounds */
 }
 
 .card-stack.bucket-mode .card-shadow {
@@ -269,6 +270,10 @@ const cardStyle = computed(() => {
 }
 .card-wrapper.is-held {
   cursor: grabbing;
+  /* Override bucket-mode clip and opacity so the held ball renders cleanly */
+  clip-path: none !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 
 /* Dismissal animations — dismiss class is only applied during the motion.rich await window,
