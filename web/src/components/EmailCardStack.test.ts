@@ -111,4 +111,73 @@ describe('EmailCardStack', () => {
     expect(w.emitted('skip')).toBeFalsy()
     expect(w.emitted('label')).toBeFalsy()
   })
+
+  // Fling tests — mock performance.now() to control timestamps between events
+  it('emits discard on fast leftward fling (option B: speed + alignment)', async () => {
+    let mockTime = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => mockTime)
+    const w = mount(EmailCardStack, { props: { item, isBucketMode: false } })
+    const el = w.find('.card-wrapper').element
+    mockPointerCapture(el)
+    mockTime = 0;  fire(el, 'pointerdown', { pointerId: 1, clientX: 512, clientY: 300 })
+    mockTime = 30; fire(el, 'pointermove', { pointerId: 1, clientX: 400, clientY: 310 })
+    mockTime = 50; fire(el, 'pointermove', { pointerId: 1, clientX: 288, clientY: 320 })
+    // vx = (288-400)/(50-30)*1000 = -5600 px/s, vy ≈ 500 px/s
+    // speed ≈ 5622 px/s > 600, alignment = 5600/5622 ≈ 0.996 > 0.707 ✓
+    fire(el, 'pointerup', { pointerId: 1, clientX: 288, clientY: 320 })
+    await w.vm.$nextTick()
+    expect(w.emitted('discard')).toBeTruthy()
+    vi.restoreAllMocks()
+  })
+
+  it('emits skip on fast rightward fling', async () => {
+    let mockTime = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => mockTime)
+    const w = mount(EmailCardStack, { props: { item, isBucketMode: false } })
+    const el = w.find('.card-wrapper').element
+    mockPointerCapture(el)
+    mockTime = 0;  fire(el, 'pointerdown', { pointerId: 1, clientX: 512, clientY: 300 })
+    mockTime = 30; fire(el, 'pointermove', { pointerId: 1, clientX: 624, clientY: 310 })
+    mockTime = 50; fire(el, 'pointermove', { pointerId: 1, clientX: 736, clientY: 320 })
+    // vx = (736-624)/(50-30)*1000 = 5600 px/s — mirror of discard case
+    fire(el, 'pointerup', { pointerId: 1, clientX: 736, clientY: 320 })
+    await w.vm.$nextTick()
+    expect(w.emitted('skip')).toBeTruthy()
+    vi.restoreAllMocks()
+  })
+
+  it('does not fling on diagonal swipe (alignment < 0.707)', async () => {
+    let mockTime = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => mockTime)
+    const w = mount(EmailCardStack, { props: { item, isBucketMode: false } })
+    const el = w.find('.card-wrapper').element
+    mockPointerCapture(el)
+    mockTime = 0;  fire(el, 'pointerdown', { pointerId: 1, clientX: 512, clientY: 300 })
+    mockTime = 30; fire(el, 'pointermove', { pointerId: 1, clientX: 400, clientY: 150 })
+    mockTime = 50; fire(el, 'pointermove', { pointerId: 1, clientX: 288, clientY:   0 })
+    // vx = -5600 px/s, vy = -7500 px/s, speed ≈ 9356 px/s
+    // alignment = 5600/9356 ≈ 0.598 < 0.707 — too diagonal ✓
+    fire(el, 'pointerup', { pointerId: 1, clientX: 288, clientY: 0 })
+    await w.vm.$nextTick()
+    expect(w.emitted('discard')).toBeFalsy()
+    expect(w.emitted('skip')).toBeFalsy()
+    vi.restoreAllMocks()
+  })
+
+  it('does not fling on slow movement (speed < threshold)', async () => {
+    let mockTime = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => mockTime)
+    const w = mount(EmailCardStack, { props: { item, isBucketMode: false } })
+    const el = w.find('.card-wrapper').element
+    mockPointerCapture(el)
+    mockTime = 0;   fire(el, 'pointerdown', { pointerId: 1, clientX: 512, clientY: 300 })
+    mockTime = 100; fire(el, 'pointermove', { pointerId: 1, clientX: 480, clientY: 300 })
+    mockTime = 200; fire(el, 'pointermove', { pointerId: 1, clientX: 450, clientY: 300 })
+    // vx = (450-480)/(200-100)*1000 = -300 px/s < 600 threshold
+    fire(el, 'pointerup', { pointerId: 1, clientX: 450, clientY: 300 })
+    await w.vm.$nextTick()
+    expect(w.emitted('discard')).toBeFalsy()
+    expect(w.emitted('skip')).toBeFalsy()
+    vi.restoreAllMocks()
+  })
 })
