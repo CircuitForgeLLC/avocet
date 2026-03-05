@@ -1,7 +1,7 @@
 <template>
   <div class="label-view">
     <!-- Header bar -->
-    <header class="lv-header">
+    <header class="lv-header" :class="{ 'is-held': isHeld }">
       <span class="queue-count">
         <span v-if="loading" class="queue-status">Loading…</span>
         <template v-else-if="store.totalRemaining > 0">
@@ -54,7 +54,7 @@
         >→</div>
       </Transition>
 
-      <div class="card-stack-wrapper">
+      <div class="card-stack-wrapper" :class="{ 'is-held': isHeld }">
         <EmailCardStack
           :item="store.current"
           :is-bucket-mode="isHeld"
@@ -329,6 +329,11 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 0.75rem;
   flex-wrap: wrap;
+  transition: opacity 200ms ease;
+}
+.lv-header.is-held {
+  opacity: 0.2;
+  pointer-events: none;
 }
 
 .queue-count {
@@ -422,6 +427,14 @@ onUnmounted(() => {
   min-height: 0;   /* allow flex child to shrink — default auto prevents this */
   overflow-y: auto;
   padding-bottom: 0.5rem;
+  transition: opacity 200ms ease;
+}
+/* When held: escape the overflow clip so the ball floats freely,
+   and rise above the footer (z-index 10) so the ball is visible. */
+.card-stack-wrapper.is-held {
+  overflow: visible;
+  position: relative;
+  z-index: 20;
 }
 
 /* Bucket grid stays pinned to the bottom of the viewport while the email card
@@ -432,10 +445,12 @@ onUnmounted(() => {
   padding: 0.5rem 0 0.75rem;
   z-index: 10;
   transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              opacity 200ms ease,
               background 200ms ease;
 }
 .bucket-grid-footer.grid-active {
   transform: translateY(-8px);
+  opacity: 0.45; /* semi-transparent so ball aura is visible through it */
 }
 
 /* ── Toss edge zones ── */
