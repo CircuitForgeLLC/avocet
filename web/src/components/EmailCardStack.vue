@@ -201,7 +201,7 @@ const cardStyle = computed(() => {
     'transparent'
 
   return {
-    transform:    `translate(${deltaX.value}px, ${deltaY.value}px) scale(0.35)`,
+    transform:    `translate(${deltaX.value}px, ${deltaY.value - 80}px) scale(0.55)`,
     borderRadius: '50%',
     background:   aura,
     transition:   'border-radius 150ms ease, background 150ms ease',
