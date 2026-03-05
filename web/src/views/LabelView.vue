@@ -36,23 +36,44 @@
 
     <!-- Card stack + label grid -->
     <template v-else>
+      <!-- Toss edge zones — thin trip-wires at screen edges, visible only while card is held -->
+      <Transition name="zone-fade">
+        <div
+          v-if="isHeld && motion.rich.value"
+          class="toss-zone toss-zone-left"
+          :class="{ active: hoveredZone === 'discard' }"
+          aria-hidden="true"
+        >✕</div>
+      </Transition>
+      <Transition name="zone-fade">
+        <div
+          v-if="isHeld && motion.rich.value"
+          class="toss-zone toss-zone-right"
+          :class="{ active: hoveredZone === 'skip' }"
+          aria-hidden="true"
+        >→</div>
+      </Transition>
+
       <div class="card-stack-wrapper">
         <EmailCardStack
           :item="store.current"
-          :is-bucket-mode="isDragging"
+          :is-bucket-mode="isHeld"
           :dismiss-type="dismissType"
           @label="handleLabel"
           @skip="handleSkip"
           @discard="handleDiscard"
-          @drag-start="isDragging = true"
-          @drag-end="isDragging = false"
+          @drag-start="isHeld = true"
+          @drag-end="isHeld = false"
+          @zone-hover="hoveredZone = $event"
+          @bucket-hover="hoveredBucket = $event"
         />
       </div>
 
-      <div class="bucket-grid-footer">
+      <div class="bucket-grid-footer" :class="{ 'grid-active': isHeld }">
         <LabelBucketGrid
           :labels="labels"
-          :is-bucket-mode="isDragging"
+          :is-bucket-mode="isHeld"
+          :hovered-bucket="hoveredBucket"
           @label="handleLabel"
         />
       </div>
@@ -86,7 +107,9 @@ const motion  = useMotion()   // only needed to pass to child — actual value u
 
 const loading    = ref(true)
 const apiError   = ref(false)
-const isDragging = ref(false)
+const isHeld     = ref(false)
+const hoveredZone   = ref<'discard' | 'skip' | null>(null)
+const hoveredBucket = ref<string | null>(null)
 const labels     = ref<any[]>([])
 const dismissType = ref<'label' | 'skip' | 'discard' | null>(null)
 
@@ -408,5 +431,38 @@ onUnmounted(() => {
   background: var(--color-bg, var(--color-surface, #f0f4fc));
   padding: 0.5rem 0 0.75rem;
   z-index: 10;
+  transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              background 200ms ease;
 }
+.bucket-grid-footer.grid-active {
+  transform: translateY(-8px);
+}
+
+/* ── Toss edge zones ── */
+.toss-zone {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 7%;
+  z-index: 50;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  opacity: 0.25;
+  transition: opacity 200ms ease, background 200ms ease;
+}
+.toss-zone-left  { left: 0;  background: rgba(244, 67,  54, 0.12); color: #ef4444; }
+.toss-zone-right { right: 0; background: rgba(255, 152,  0, 0.12); color: #f97316; }
+.toss-zone.active {
+  opacity: 0.85;
+  background: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+/* Zone transition */
+.zone-fade-enter-active,
+.zone-fade-leave-active { transition: opacity 180ms ease; }
+.zone-fade-enter-from,
+.zone-fade-leave-to     { opacity: 0; }
 </style>
