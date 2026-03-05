@@ -66,6 +66,13 @@ const hoveredBucketName = ref<string | null>(null)
 // Zone threshold: 7% of viewport width on each side
 const ZONE_PCT = 0.07
 
+// Fling detection — Option B: speed + direction alignment
+// Plain array (not ref) — drives no template state, updates on every pointermove
+const FLING_SPEED_PX_S = 600   // px/s minimum to qualify as a fling
+const FLING_ALIGN      = 0.707 // cos(45°) — velocity must point within 45° of horizontal
+const FLING_WINDOW_MS  = 50    // rolling sample window in ms
+let velocityBuf: { x: number; y: number; t: number }[] = []
+
 function onPointerDown(e: PointerEvent) {
   if (!motion.rich.value) return
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
@@ -76,6 +83,7 @@ function onPointerDown(e: PointerEvent) {
   isHeld.value = true
   hoveredZone.value = null
   hoveredBucketName.value = null
+  velocityBuf = []
   emit('drag-start')
 }
 
@@ -83,6 +91,13 @@ function onPointerMove(e: PointerEvent) {
   if (!isHeld.value) return
   deltaX.value = e.clientX - pickupX.value
   deltaY.value = e.clientY - pickupY.value
+
+  // Rolling velocity buffer — keep only the last FLING_WINDOW_MS of samples
+  const now = performance.now()
+  velocityBuf.push({ x: e.clientX, y: e.clientY, t: now })
+  while (velocityBuf.length > 1 && now - velocityBuf[0].t > FLING_WINDOW_MS) {
+    velocityBuf.shift()
+  }
 
   const vw = window.innerWidth
   const zone: 'discard' | 'skip' | null =
@@ -112,6 +127,27 @@ function onPointerUp(e: PointerEvent) {
   emit('drag-end')
   emit('zone-hover', null)
   emit('bucket-hover', null)
+
+  // Fling detection (Option B): fires before zone check so a fast fling
+  // resolves even if the pointer didn't reach the 7% edge zone
+  if (hoveredZone.value === null && hoveredBucketName.value === null
+      && velocityBuf.length >= 2) {
+    const oldest = velocityBuf[0]
+    const newest = velocityBuf[velocityBuf.length - 1]
+    const dt = (newest.t - oldest.t) / 1000 // seconds
+    if (dt > 0) {
+      const vx    = (newest.x - oldest.x) / dt
+      const vy    = (newest.y - oldest.y) / dt
+      const speed = Math.sqrt(vx * vx + vy * vy)
+      // Require: fast enough AND velocity points within 45° of horizontal
+      if (speed >= FLING_SPEED_PX_S && Math.abs(vx) / speed >= FLING_ALIGN) {
+        velocityBuf = []
+        emit(vx < 0 ? 'discard' : 'skip')
+        return
+      }
+    }
+  }
+  velocityBuf = []
 
   if (hoveredZone.value === 'discard') {
     hoveredZone.value = null
@@ -143,6 +179,7 @@ function onPointerCancel(e: PointerEvent) {
   deltaY.value = 0
   hoveredZone.value = null
   hoveredBucketName.value = null
+  velocityBuf = []
   emit('drag-end')
   emit('zone-hover', null)
   emit('bucket-hover', null)
