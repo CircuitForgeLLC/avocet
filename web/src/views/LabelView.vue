@@ -69,7 +69,7 @@
         />
       </div>
 
-      <div class="bucket-grid-footer" :class="{ 'grid-active': isHeld }">
+      <div ref="gridEl" class="bucket-grid-footer" :class="{ 'grid-active': isHeld }">
         <LabelBucketGrid
           :labels="labels"
           :is-bucket-mode="isHeld"
@@ -90,7 +90,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { animate, spring } from 'animejs'
 import { useLabelStore } from '../stores/label'
 import { useApiFetch } from '../composables/useApi'
 import { useHaptics } from '../composables/useHaptics'
@@ -105,6 +106,8 @@ const store   = useLabelStore()
 const haptics = useHaptics()
 const motion  = useMotion()   // only needed to pass to child — actual value used in App.vue
 
+const gridEl     = ref<HTMLElement | null>(null)
+
 const loading    = ref(true)
 const apiError   = ref(false)
 const isHeld     = ref(false)
@@ -112,6 +115,15 @@ const hoveredZone   = ref<'discard' | 'skip' | null>(null)
 const hoveredBucket = ref<string | null>(null)
 const labels     = ref<any[]>([])
 const dismissType = ref<'label' | 'skip' | 'discard' | null>(null)
+
+watch(isHeld, (held) => {
+  if (!motion.rich.value || !gridEl.value) return
+  animate(gridEl.value,
+    held
+      ? { y: -8, opacity: 0.45, ease: spring({ mass: 1, stiffness: 80, damping: 10 }), duration: 250 }
+      : { y:  0, opacity: 1,    ease: spring({ mass: 1, stiffness: 80, damping: 10 }), duration: 250 }
+  )
+})
 
 // Easter egg state
 const consecutiveLabeled = ref(0)
@@ -314,8 +326,8 @@ onUnmounted(() => {
   padding: 1rem;
   max-width: 640px;
   margin: 0 auto;
-  height: 100dvh;   /* hard cap — prevents grid from drifting below fold */
-  overflow: hidden;
+  min-height: 100dvh;
+  overflow-x: hidden; /* prevent card animations from causing horizontal scroll */
 }
 
 .queue-status {
@@ -424,13 +436,10 @@ onUnmounted(() => {
 
 .card-stack-wrapper {
   flex: 1;
-  min-height: 0;   /* allow flex child to shrink — default auto prevents this */
-  overflow-y: auto;
+  min-height: 0;
   padding-bottom: 0.5rem;
-  transition: opacity 200ms ease;
 }
-/* When held: escape the overflow clip so the ball floats freely,
-   and rise above the footer (z-index 10) so the ball is visible. */
+/* When held: escape overflow clip so ball floats freely above the footer. */
 .card-stack-wrapper.is-held {
   overflow: visible;
   position: relative;
@@ -441,16 +450,21 @@ onUnmounted(() => {
    can be scrolled freely. "hired" (10th button) may clip on very small screens
    — that is intentional per design. */
 .bucket-grid-footer {
+  position: sticky;
+  bottom: 0;
   background: var(--color-bg, var(--color-surface, #f0f4fc));
   padding: 0.5rem 0 0.75rem;
   z-index: 10;
-  transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1),
-              opacity 200ms ease,
-              background 200ms ease;
 }
+/* During toss: switch to fixed so the grid is guaranteed in-viewport
+   regardless of scroll position, then fade so ball aura shows through. */
 .bucket-grid-footer.grid-active {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
   transform: translateY(-8px);
-  opacity: 0.45; /* semi-transparent so ball aura is visible through it */
+  opacity: 0.45;
 }
 
 /* ── Toss edge zones ── */
