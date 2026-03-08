@@ -2,6 +2,18 @@ import { mount } from '@vue/test-utils'
 import EmailCardStack from './EmailCardStack.vue'
 import { describe, it, expect, vi } from 'vitest'
 
+vi.mock('../composables/useCardAnimation', () => ({
+  useCardAnimation: vi.fn(() => ({
+    pickup:          vi.fn(),
+    setDragPosition: vi.fn(),
+    snapBack:        vi.fn(),
+    animateDismiss:  vi.fn(),
+  })),
+}))
+
+import { useCardAnimation } from '../composables/useCardAnimation'
+import { nextTick } from 'vue'
+
 const item = {
   id: 'abc',
   subject: 'Interview at Acme',
@@ -22,27 +34,13 @@ describe('EmailCardStack', () => {
     expect(w.findAll('.card-shadow')).toHaveLength(2)
   })
 
-  it('applies dismiss-label class when dismissType is label', () => {
-    const w = mount(EmailCardStack, { props: { item, isBucketMode: false, dismissType: 'label' } })
-    expect(w.find('.card-wrapper').classes()).toContain('dismiss-label')
-  })
-
-  it('applies dismiss-discard class when dismissType is discard', () => {
-    const w = mount(EmailCardStack, { props: { item, isBucketMode: false, dismissType: 'discard' } })
-    expect(w.find('.card-wrapper').classes()).toContain('dismiss-discard')
-  })
-
-  it('applies dismiss-skip class when dismissType is skip', () => {
-    const w = mount(EmailCardStack, { props: { item, isBucketMode: false, dismissType: 'skip' } })
-    expect(w.find('.card-wrapper').classes()).toContain('dismiss-skip')
-  })
-
-  it('no dismiss class when dismissType is null', () => {
+  it('calls animateDismiss with type when dismissType prop changes', async () => {
+    ;(useCardAnimation as ReturnType<typeof vi.fn>).mockClear()
     const w = mount(EmailCardStack, { props: { item, isBucketMode: false, dismissType: null } })
-    const wrapperClasses = w.find('.card-wrapper').classes()
-    expect(wrapperClasses).not.toContain('dismiss-label')
-    expect(wrapperClasses).not.toContain('dismiss-discard')
-    expect(wrapperClasses).not.toContain('dismiss-skip')
+    const { animateDismiss } = (useCardAnimation as ReturnType<typeof vi.fn>).mock.results[0].value
+    await w.setProps({ dismissType: 'label' })
+    await nextTick()
+    expect(animateDismiss).toHaveBeenCalledWith('label')
   })
 
   // JSDOM doesn't implement setPointerCapture — mock it on the element.
