@@ -185,7 +185,8 @@ const BALL_RADIUS       = '50%'
 const CARD_RADIUS       = '1rem'
 const PICKUP_Y_OFFSET   = 80      // px above finger
 const PICKUP_DURATION   = 200
-const SNAP_SPRING       = spring(1, 80, 10)
+// NOTE: animejs v4 — spring() takes an object, not positional args
+const SNAP_SPRING       = spring({ mass: 1, stiffness: 80, damping: 10 })
 
 interface Motion { rich: Ref<boolean> }
 
@@ -195,13 +196,13 @@ export function useCardAnimation(
 ) {
   function pickup() {
     if (!motion.rich.value || !cardEl.value) return
+    // NOTE: animejs v4 — animate() is 2-arg; timing options merge into the params object
     animate(cardEl.value, {
       scale:        BALL_SCALE,
       borderRadius: BALL_RADIUS,
       y:            -PICKUP_Y_OFFSET,
-    }, {
-      duration: PICKUP_DURATION,
-      ease:     SNAP_SPRING,
+      duration:     PICKUP_DURATION,
+      ease:         SNAP_SPRING,
     })
   }
 
@@ -212,13 +213,13 @@ export function useCardAnimation(
 
   function snapBack() {
     if (!motion.rich.value || !cardEl.value) return
+    // No duration — spring physics determines settling time
     animate(cardEl.value, {
       x:            0,
       y:            0,
       scale:        1,
       borderRadius: CARD_RADIUS,
-    }, {
-      ease: SNAP_SPRING,
+      ease:         SNAP_SPRING,
     })
   }
 
@@ -226,10 +227,10 @@ export function useCardAnimation(
     if (!motion.rich.value || !cardEl.value) return
     const el = cardEl.value
     if (type === 'label') {
-      animate(el, { y: '-120%', scale: 0.85, opacity: 0 }, { duration: 280, ease: 'out(3)' })
+      animate(el, { y: '-120%', scale: 0.85, opacity: 0, duration: 280, ease: 'out(3)' })
     } else if (type === 'discard') {
-      // Two-step: crumple then shrink
-      animate(el, [
+      // Two-step: crumple then shrink (keyframes array in params object)
+      animate(el, { keyframes: [
         { scale: 0.95, rotate: 2,  filter: 'brightness(0.6) sepia(1) hue-rotate(-20deg)', duration: 140 },
         { scale: 0,    rotate: 8,  opacity: 0,                                             duration: 210 },
       ])
@@ -420,11 +421,11 @@ const gridEl = ref<HTMLElement | null>(null)
 ```ts
 watch(isHeld, (held) => {
   if (!motion.rich.value || !gridEl.value) return
+  // animejs v4: 2-arg animate, spring() takes object
   animate(gridEl.value,
     held
-      ? { y: -8, opacity: 0.45 }
-      : { y:  0, opacity: 1    },
-    { ease: spring(1, 80, 10), duration: 250 }
+      ? { y: -8, opacity: 0.45, ease: spring({ mass: 1, stiffness: 80, damping: 10 }), duration: 250 }
+      : { y:  0, opacity: 1,    ease: spring({ mass: 1, stiffness: 80, damping: 10 }), duration: 250 }
   )
 })
 ```
