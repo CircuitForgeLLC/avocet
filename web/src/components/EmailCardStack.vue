@@ -11,8 +11,7 @@
     <div
       class="card-wrapper"
       ref="cardEl"
-      :class="[dismissClass, { 'is-held': isHeld }]"
-      :style="cardStyle"
+      :class="{ 'is-held': isHeld }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
@@ -29,8 +28,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, watch } from 'vue'
 import { useMotion } from '../composables/useMotion'
+import { useCardAnimation } from '../composables/useCardAnimation'
 import EmailCard from './EmailCard.vue'
 import type { QueueItem } from '../stores/label'
 
@@ -54,12 +54,16 @@ const motion     = useMotion()
 const cardEl     = ref<HTMLElement | null>(null)
 const isExpanded = ref(false)
 
+const { pickup, setDragPosition, snapBack, animateDismiss } = useCardAnimation(cardEl, motion)
+
+watch(() => props.dismissType, (type) => {
+  if (type) animateDismiss(type)
+})
+
 // Toss gesture state
 const isHeld            = ref(false)
 const pickupX           = ref(0)
 const pickupY           = ref(0)
-const deltaX            = ref(0)
-const deltaY            = ref(0)
 const hoveredZone       = ref<'discard' | 'skip' | null>(null)
 const hoveredBucketName = ref<string | null>(null)
 
@@ -78,9 +82,8 @@ function onPointerDown(e: PointerEvent) {
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   pickupX.value = e.clientX
   pickupY.value = e.clientY
-  deltaX.value = 0
-  deltaY.value = 0
   isHeld.value = true
+  pickup()
   hoveredZone.value = null
   hoveredBucketName.value = null
   velocityBuf = []
@@ -89,8 +92,9 @@ function onPointerDown(e: PointerEvent) {
 
 function onPointerMove(e: PointerEvent) {
   if (!isHeld.value) return
-  deltaX.value = e.clientX - pickupX.value
-  deltaY.value = e.clientY - pickupY.value
+  const dx = e.clientX - pickupX.value
+  const dy = e.clientY - pickupY.value
+  setDragPosition(dx, dy)
 
   // Rolling velocity buffer — keep only the last FLING_WINDOW_MS of samples
   const now = performance.now()
@@ -163,9 +167,8 @@ function onPointerUp(e: PointerEvent) {
     hoveredBucketName.value = null
     emit('label', name)
   } else {
-    // Snap back — reset deltas
-    deltaX.value = 0
-    deltaY.value = 0
+    // Snap back
+    snapBack()
     hoveredZone.value = null
     hoveredBucketName.value = null
   }
@@ -175,8 +178,7 @@ function onPointerCancel(e: PointerEvent) {
   if (!isHeld.value) return
   ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
   isHeld.value = false
-  deltaX.value = 0
-  deltaY.value = 0
+  snapBack()
   hoveredZone.value = null
   hoveredBucketName.value = null
   velocityBuf = []
@@ -184,32 +186,6 @@ function onPointerCancel(e: PointerEvent) {
   emit('zone-hover', null)
   emit('bucket-hover', null)
 }
-
-const dismissClass = computed(() => {
-  if (!props.dismissType) return null
-  return `dismiss-${props.dismissType}`
-})
-
-const cardStyle = computed(() => {
-  if (!motion.rich.value || !isHeld.value) return {}
-
-  // Aura color: zone > bucket > neutral
-  const aura =
-    hoveredZone.value === 'discard'  ? 'rgba(244,67,54,0.25)'  :
-    hoveredZone.value === 'skip'     ? 'rgba(255,152,0,0.25)'  :
-    hoveredBucketName.value          ? 'rgba(42,96,128,0.20)'  :
-    'transparent'
-
-  return {
-    transform:    `translate(${deltaX.value}px, ${deltaY.value - 80}px) scale(0.55)`,
-    borderRadius: '50%',
-    background:   aura,
-    transition:   'border-radius 150ms ease, background 150ms ease',
-    cursor:       'grabbing',
-    zIndex:       100,
-    userSelect:   'none',
-  }
-})
 </script>
 
 <style scoped>
@@ -274,30 +250,6 @@ const cardStyle = computed(() => {
   clip-path: none !important;
   opacity: 1 !important;
   pointer-events: auto !important;
-}
-
-/* Dismissal animations — dismiss class is only applied during the motion.rich await window,
-   so no ancestor guard needed; :global(.rich-motion) was being miscompiled by Vue's scoped
-   CSS transformer (dropping the descendant selector entirely). */
-.card-wrapper.dismiss-label {
-  animation: fileAway var(--card-dismiss, 350ms ease-in) forwards;
-}
-.card-wrapper.dismiss-discard {
-  animation: crumple var(--card-dismiss, 350ms ease-in) forwards;
-}
-.card-wrapper.dismiss-skip {
-  animation: slideUnder var(--card-skip, 300ms ease-out) forwards;
-}
-
-@keyframes fileAway {
-  to { transform: translateY(-120%) scale(0.85); opacity: 0; }
-}
-@keyframes crumple {
-  50% { transform: scale(0.95) rotate(2deg); filter: brightness(0.6) sepia(1) hue-rotate(-20deg); }
-  to  { transform: scale(0) rotate(8deg); opacity: 0; }
-}
-@keyframes slideUnder {
-  to { transform: translateX(110%) rotate(5deg); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
