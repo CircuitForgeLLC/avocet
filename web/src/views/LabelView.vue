@@ -461,10 +461,10 @@ onUnmounted(() => {
 .bucket-grid-footer.grid-active {
   position: fixed;
   bottom: 0;
-  left: 0;
-  right: 0;
-  transform: translateY(-8px);
+  left: calc(50% - min(50%, 320px));
+  right: calc(50% - min(50%, 320px));
   opacity: 0.45;
+  /* translateY(-8px) is owned by Anime.js — no transform here */
 }
 
 /* ── Toss edge zones ── */
