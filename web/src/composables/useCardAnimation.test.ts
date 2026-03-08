@@ -101,4 +101,42 @@ describe('useCardAnimation', () => {
     animateDismiss('label')
     expect(mockAnimate).not.toHaveBeenCalled()
   })
+
+  describe('updateAura', () => {
+    it('sets red background for discard zone', () => {
+      const el = makeEl()
+      const cardEl = ref<HTMLElement | null>(el)
+      const motion = { rich: ref(true) }
+      const { updateAura } = useCardAnimation(cardEl, motion)
+      updateAura('discard', null)
+      expect(mockSet).toHaveBeenCalledWith(el, expect.objectContaining({ background: 'rgba(244, 67, 54, 0.25)' }))
+    })
+
+    it('sets orange background for skip zone', () => {
+      const el = makeEl()
+      const cardEl = ref<HTMLElement | null>(el)
+      const motion = { rich: ref(true) }
+      const { updateAura } = useCardAnimation(cardEl, motion)
+      updateAura('skip', null)
+      expect(mockSet).toHaveBeenCalledWith(el, expect.objectContaining({ background: 'rgba(255, 152,  0, 0.25)' }))
+    })
+
+    it('sets blue background for bucket hover', () => {
+      const el = makeEl()
+      const cardEl = ref<HTMLElement | null>(el)
+      const motion = { rich: ref(true) }
+      const { updateAura } = useCardAnimation(cardEl, motion)
+      updateAura(null, 'interview_scheduled')
+      expect(mockSet).toHaveBeenCalledWith(el, expect.objectContaining({ background: 'rgba(42,  96, 128, 0.20)' }))
+    })
+
+    it('sets transparent background when no zone/bucket', () => {
+      const el = makeEl()
+      const cardEl = ref<HTMLElement | null>(el)
+      const motion = { rich: ref(true) }
+      const { updateAura } = useCardAnimation(cardEl, motion)
+      updateAura(null, null)
+      expect(mockSet).toHaveBeenCalledWith(el, expect.objectContaining({ background: 'transparent' }))
+    })
+  })
 })

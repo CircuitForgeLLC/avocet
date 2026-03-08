@@ -8,6 +8,7 @@ vi.mock('../composables/useCardAnimation', () => ({
     setDragPosition: vi.fn(),
     snapBack:        vi.fn(),
     animateDismiss:  vi.fn(),
+    updateAura:      vi.fn(),
   })),
 }))
 

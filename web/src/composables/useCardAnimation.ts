@@ -63,5 +63,22 @@ export function useCardAnimation(
     }
   }
 
-  return { pickup, setDragPosition, snapBack, animateDismiss }
+  const AURA_COLORS = {
+    discard: 'rgba(244, 67, 54, 0.25)',
+    skip:    'rgba(255, 152,  0, 0.25)',
+    bucket:  'rgba(42,  96, 128, 0.20)',
+    none:    'transparent',
+  } as const
+
+  function updateAura(zone: 'discard' | 'skip' | null, bucket: string | null) {
+    if (!cardEl.value) return
+    const color =
+      zone === 'discard' ? AURA_COLORS.discard :
+      zone === 'skip'    ? AURA_COLORS.skip    :
+      bucket             ? AURA_COLORS.bucket  :
+      AURA_COLORS.none
+    utils.set(cardEl.value, { background: color })
+  }
+
+  return { pickup, setDragPosition, snapBack, animateDismiss, updateAura }
 }

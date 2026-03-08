@@ -54,7 +54,7 @@ const motion     = useMotion()
 const cardEl     = ref<HTMLElement | null>(null)
 const isExpanded = ref(false)
 
-const { pickup, setDragPosition, snapBack, animateDismiss } = useCardAnimation(cardEl, motion)
+const { pickup, setDragPosition, snapBack, animateDismiss, updateAura } = useCardAnimation(cardEl, motion)
 
 watch(() => props.dismissType, (type) => {
   if (type) animateDismiss(type)
@@ -122,6 +122,7 @@ function onPointerMove(e: PointerEvent) {
     hoveredBucketName.value = bucketName
     emit('bucket-hover', bucketName)
   }
+  updateAura(hoveredZone.value, hoveredBucketName.value)
 }
 
 function onPointerUp(e: PointerEvent) {
@@ -169,6 +170,7 @@ function onPointerUp(e: PointerEvent) {
   } else {
     // Snap back
     snapBack()
+    updateAura(null, null)
     hoveredZone.value = null
     hoveredBucketName.value = null
   }
@@ -179,6 +181,7 @@ function onPointerCancel(e: PointerEvent) {
   ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
   isHeld.value = false
   snapBack()
+  updateAura(null, null)
   hoveredZone.value = null
   hoveredBucketName.value = null
   velocityBuf = []
