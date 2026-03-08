@@ -54,10 +54,16 @@ const motion     = useMotion()
 const cardEl     = ref<HTMLElement | null>(null)
 const isExpanded = ref(false)
 
-const { pickup, setDragPosition, snapBack, animateDismiss, updateAura } = useCardAnimation(cardEl, motion)
+const { pickup, setDragPosition, snapBack, animateDismiss, updateAura, reset } = useCardAnimation(cardEl, motion)
 
 watch(() => props.dismissType, (type) => {
   if (type) animateDismiss(type)
+})
+
+// When a new card loads into the same element, clear any inline styles left by the previous animation
+watch(() => props.item.id, () => {
+  reset()
+  isExpanded.value = false
 })
 
 // Toss gesture state

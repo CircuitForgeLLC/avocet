@@ -80,5 +80,20 @@ export function useCardAnimation(
     utils.set(cardEl.value, { background: color })
   }
 
-  return { pickup, setDragPosition, snapBack, animateDismiss, updateAura }
+  function reset() {
+    if (!cardEl.value) return
+    // Instantly restore initial card state — called when a new item loads into the same element
+    utils.set(cardEl.value, {
+      x:            0,
+      y:            0,
+      scale:        1,
+      opacity:      1,
+      rotate:       0,
+      borderRadius: CARD_RADIUS,
+      background:   'transparent',
+      filter:       'none',
+    })
+  }
+
+  return { pickup, setDragPosition, snapBack, animateDismiss, updateAura, reset }
 }
