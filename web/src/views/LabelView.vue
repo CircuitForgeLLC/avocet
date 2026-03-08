@@ -8,12 +8,24 @@
           {{ store.totalRemaining }} remaining
         </template>
         <span v-else class="queue-status">Queue empty</span>
-        <span v-if="onRoll"         class="badge badge-roll">🔥 On a roll!</span>
-        <span v-if="speedRound"     class="badge badge-speed">⚡ Speed round!</span>
-        <span v-if="fiftyDeep"      class="badge badge-fifty">🎯 Fifty deep!</span>
-        <span v-if="centuryMark"    class="badge badge-century">💯 Century!</span>
-        <span v-if="cleanSweep"     class="badge badge-sweep">🧹 Clean sweep!</span>
-        <span v-if="midnightLabeler" class="badge badge-midnight">🦉 Midnight labeler!</span>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="onRoll"         class="badge badge-roll">🔥 On a roll!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="speedRound"     class="badge badge-speed">⚡ Speed round!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="fiftyDeep"      class="badge badge-fifty">🎯 Fifty deep!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="centuryMark"    class="badge badge-century">💯 Century!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="cleanSweep"     class="badge badge-sweep">🧹 Clean sweep!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="midnightLabeler" class="badge badge-midnight">🦉 Midnight labeler!</span>
+        </Transition>
       </span>
       <div class="header-actions">
         <button @click="handleUndo"    :disabled="!store.lastAction" class="btn-action">↩ Undo</button>
@@ -124,6 +136,13 @@ watch(isHeld, (held) => {
       : { y:  0, opacity: 1,    ease: spring({ mass: 1, stiffness: 80, damping: 10 }), duration: 250 }
   )
 })
+
+function onBadgeEnter(el: Element, done: () => void) {
+  if (!motion.rich.value) { done(); return }
+  animate(el as HTMLElement,
+    { scale: [0.6, 1], opacity: [0, 1], ease: spring({ mass: 1.5, stiffness: 80, damping: 8 }), duration: 300, onComplete: done }
+  )
+}
 
 // Easter egg state
 const consecutiveLabeled = ref(0)
@@ -364,12 +383,6 @@ onUnmounted(() => {
   font-size: 0.75rem;
   font-weight: 700;
   font-family: var(--font-body, sans-serif);
-  animation: badge-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-@keyframes badge-pop {
-  from { transform: scale(0.6); opacity: 0; }
-  to   { transform: scale(1);   opacity: 1; }
 }
 
 .badge-roll    { background: #ff6b35; color: #fff; }
