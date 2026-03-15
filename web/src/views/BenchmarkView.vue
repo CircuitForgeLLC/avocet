@@ -17,6 +17,22 @@
       </div>
     </header>
 
+    <!-- Trained models badge row -->
+    <div v-if="fineTunedModels.length > 0" class="trained-models-row">
+      <span class="trained-label">Trained:</span>
+      <span
+        v-for="m in fineTunedModels"
+        :key="m.name"
+        class="trained-badge"
+        :title="m.base_model_id ? `Base: ${m.base_model_id} · ${m.sample_count ?? '?'} samples` : m.name"
+      >
+        {{ m.name }}
+        <span v-if="m.val_macro_f1 != null" class="trained-f1">
+          F1 {{ (m.val_macro_f1 * 100).toFixed(1) }}%
+        </span>
+      </span>
+    </div>
+
     <!-- Progress log -->
     <div v-if="running || runLog.length" class="run-log">
       <div class="run-log-title">
@@ -124,6 +140,54 @@
         <p class="heatmap-hint">Hover a cell for precision / recall / support. Color: 🟢 ≥ 0.7 · 🟡 0.4–0.7 · 🔴 &lt; 0.4</p>
       </section>
     </template>
+
+    <!-- Fine-tune section -->
+    <details class="ft-section">
+      <summary class="ft-summary">Fine-tune a model</summary>
+      <div class="ft-body">
+        <div class="ft-controls">
+          <label class="ft-field">
+            <span class="ft-field-label">Model</span>
+            <select v-model="ftModel" class="ft-select" :disabled="ftRunning">
+              <option value="deberta-small">deberta-small (100M, fast)</option>
+              <option value="bge-m3">bge-m3 (600M — stop Peregrine vLLM first)</option>
+            </select>
+          </label>
+          <label class="ft-field">
+            <span class="ft-field-label">Epochs</span>
+            <input
+              v-model.number="ftEpochs"
+              type="number" min="1" max="20"
+              class="ft-epochs"
+              :disabled="ftRunning"
+            />
+          </label>
+          <button
+            class="btn-run ft-run-btn"
+            :disabled="ftRunning"
+            @click="startFinetune"
+          >
+            {{ ftRunning ? '⏳ Training…' : '▶ Run fine-tune' }}
+          </button>
+        </div>
+
+        <div v-if="ftRunning || ftLog.length || ftError" class="run-log ft-log">
+          <div class="run-log-title">
+            <span>{{ ftRunning ? '⏳ Training…' : ftError ? '❌ Failed' : '✅ Done' }}</span>
+            <button class="btn-ghost" @click="ftLog = []; ftError = ''">Clear</button>
+          </div>
+          <div class="log-lines" ref="ftLogEl">
+            <div
+              v-for="(line, i) in ftLog"
+              :key="i"
+              class="log-line"
+              :class="{ 'log-error': line.startsWith('ERROR') || line.includes('ERROR') }"
+            >{{ line }}</div>
+          </div>
+          <p v-if="ftError" class="run-error">{{ ftError }}</p>
+        </div>
+      </div>
+    </details>
   </div>
 </template>
 
@@ -146,6 +210,14 @@ const LABEL_META: Record<string, { emoji: string }> = {
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
+interface FineTunedModel {
+  name: string
+  base_model_id?: string
+  val_macro_f1?: number
+  timestamp?: string
+  sample_count?: number
+}
+
 interface PerLabel { f1: number; precision: number; recall: number; support: number }
 interface ModelResult {
   macro_f1: number
@@ -167,6 +239,15 @@ const runLog      = ref<string[]>([])
 const runError    = ref('')
 const includeSlow = ref(false)
 const logEl       = ref<HTMLElement | null>(null)
+
+// Fine-tune state
+const fineTunedModels  = ref<FineTunedModel[]>([])
+const ftModel          = ref('deberta-small')
+const ftEpochs         = ref(5)
+const ftRunning        = ref(false)
+const ftLog            = ref<string[]>([])
+const ftError          = ref('')
+const ftLogEl          = ref<HTMLElement | null>(null)
 
 // ── Derived ──────────────────────────────────────────────────────────────────
 const modelNames = computed(() => Object.keys(results.value?.models ?? {}))
@@ -272,7 +353,46 @@ function startBenchmark() {
   )
 }
 
-onMounted(loadResults)
+async function loadFineTunedModels() {
+  const { data } = await useApiFetch<FineTunedModel[]>('/api/finetune/status')
+  if (Array.isArray(data)) fineTunedModels.value = data
+}
+
+function startFinetune() {
+  if (ftRunning.value) return
+  ftRunning.value = true
+  ftLog.value     = []
+  ftError.value   = ''
+
+  const params = new URLSearchParams({ model: ftModel.value, epochs: String(ftEpochs.value) })
+  useApiSSE(
+    `/api/finetune/run?${params}`,
+    async (event) => {
+      if (event.type === 'progress' && typeof event.message === 'string') {
+        ftLog.value.push(event.message)
+        await nextTick()
+        ftLogEl.value?.scrollTo({ top: ftLogEl.value.scrollHeight, behavior: 'smooth' })
+      }
+      if (event.type === 'error' && typeof event.message === 'string') {
+        ftError.value = event.message
+      }
+    },
+    async () => {
+      ftRunning.value = false
+      await loadFineTunedModels()
+      startBenchmark()          // auto-trigger benchmark to refresh charts
+    },
+    () => {
+      ftRunning.value = false
+      if (!ftError.value) ftError.value = 'Connection lost'
+    },
+  )
+}
+
+onMounted(() => {
+  loadResults()
+  loadFineTunedModels()
+})
 </script>
 
 <style scoped>
@@ -547,5 +667,129 @@ onMounted(loadResults)
   .bar-row { grid-template-columns: 9rem 1fr 4rem; }
   .bar-label { font-size: 0.7rem; }
   .bench-header { flex-direction: column; align-items: flex-start; }
+}
+
+/* ── Trained models badge row ──────────────────────────── */
+.trained-models-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--color-surface-raised, #e4ebf5);
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+}
+
+.trained-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #6b7a99);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.trained-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  background: var(--app-primary, #2A6080);
+  color: #fff;
+  border-radius: 1rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.76rem;
+  cursor: default;
+}
+
+.trained-f1 {
+  background: rgba(255,255,255,0.2);
+  border-radius: 0.75rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+/* ── Fine-tune section ──────────────────────────────────── */
+.ft-section {
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.ft-summary {
+  padding: 0.65rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text, #1a2338);
+  user-select: none;
+  list-style: none;
+  background: var(--color-surface-raised, #e4ebf5);
+}
+.ft-summary::-webkit-details-marker { display: none; }
+.ft-summary::before { content: '▶  '; font-size: 0.65rem; color: var(--color-text-secondary, #6b7a99); }
+details[open] .ft-summary::before { content: '▼  '; }
+
+.ft-body {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-top: 1px solid var(--color-border, #d0d7e8);
+}
+
+.ft-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.ft-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ft-field-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #6b7a99);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ft-select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.375rem;
+  background: var(--color-surface, #fff);
+  font-size: 0.85rem;
+  color: var(--color-text, #1a2338);
+  min-width: 220px;
+}
+.ft-select:disabled { opacity: 0.55; }
+
+.ft-epochs {
+  width: 64px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.375rem;
+  background: var(--color-surface, #fff);
+  font-size: 0.85rem;
+  color: var(--color-text, #1a2338);
+  text-align: center;
+}
+.ft-epochs:disabled { opacity: 0.55; }
+
+.ft-run-btn { align-self: flex-end; }
+
+.ft-log { margin-top: 0; }
+
+@media (max-width: 600px) {
+  .ft-controls { flex-direction: column; align-items: stretch; }
+  .ft-select { min-width: 0; width: 100%; }
 }
 </style>
