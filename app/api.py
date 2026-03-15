@@ -287,6 +287,59 @@ def test_account(req: AccountTestRequest):
 from fastapi.responses import StreamingResponse
 
 
+# ---------------------------------------------------------------------------
+# Benchmark endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/benchmark/results")
+def get_benchmark_results():
+    """Return the most recently saved benchmark results, or an empty envelope."""
+    path = _DATA_DIR / "benchmark_results.json"
+    if not path.exists():
+        return {"models": {}, "sample_count": 0, "timestamp": None}
+    return json.loads(path.read_text())
+
+
+@app.get("/api/benchmark/run")
+def run_benchmark(include_slow: bool = False):
+    """Spawn the benchmark script and stream stdout as SSE progress events."""
+    import subprocess
+
+    python_bin = "/devl/miniconda3/envs/job-seeker-classifiers/bin/python"
+    script = str(_ROOT / "scripts" / "benchmark_classifier.py")
+    cmd = [python_bin, script, "--score", "--save"]
+    if include_slow:
+        cmd.append("--include-slow")
+
+    def generate():
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(_ROOT),
+            )
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line:
+                    yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
+            proc.wait()
+            if proc.returncode == 0:
+                yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Process exited with code {proc.returncode}'})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/fetch/stream")
 def fetch_stream(
     accounts: str = Query(default=""),

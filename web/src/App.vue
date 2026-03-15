@@ -11,11 +11,13 @@
 import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
 import { useMotion } from './composables/useMotion'
-import { useHackerMode } from './composables/useEasterEgg'
+import { useHackerMode, useKonamiCode } from './composables/useEasterEgg'
 import AppSidebar from './components/AppSidebar.vue'
 
 const motion = useMotion()
-const { restore } = useHackerMode()
+const { toggle, restore } = useHackerMode()
+
+useKonamiCode(toggle)
 
 onMounted(() => {
   restore()  // re-apply hacker mode from localStorage on page load

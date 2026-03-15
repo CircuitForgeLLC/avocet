@@ -8,8 +8,29 @@
      Accent  — Russet      (#B8622A) — inspired by avocet's vivid orange-russet head
 */
 
+/* ── Page-level overrides — must be in avocet.css (applied after theme.css base) ── */
+html {
+  /* Prevent Mac Chrome's horizontal swipe-to-navigate page animation
+     from triggering when the user scrolls near the viewport edge */
+  overscroll-behavior-x: none;
+  /* clip (not hidden) — prevents overflowing content from expanding the html layout
+     width beyond the viewport. Without this, body's overflow-x:hidden propagates to
+     the viewport and body has no BFC, so long email URLs inflate the layout and
+     margin:0 auto centering drifts rightward as fonts load. */
+  overflow-x: clip;
+}
+
+body {
+  /* Prevent horizontal scroll from card swipe animations */
+  overflow-x: hidden;
+}
+
+
 /* ── Light mode (default) ──────────────────────────── */
 :root {
+  /* Aliases bridging avocet component vars to CircuitForge base theme vars */
+  --color-bg:             var(--color-surface);     /* App.vue body bg → #eaeff8 in light */
+  --color-text-secondary: var(--color-text-muted);  /* muted label text */
   /* Primary — Slate Teal */
   --app-primary:       #2A6080;   /* 4.8:1 on light surface #eaeff8 — ✅ AA */
   --app-primary-hover: #1E4D66;   /* darker for hover */

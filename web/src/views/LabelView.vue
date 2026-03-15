@@ -103,7 +103,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue'
-import { animate, spring } from 'animejs'
+import { animate } from 'animejs'
 import { useLabelStore } from '../stores/label'
 import { useApiFetch } from '../composables/useApi'
 import { useHaptics } from '../composables/useHaptics'
@@ -132,8 +132,8 @@ watch(isHeld, (held) => {
   if (!motion.rich.value || !gridEl.value) return
   animate(gridEl.value,
     held
-      ? { y: -8, opacity: 0.45, ease: spring({ mass: 1, stiffness: 80, damping: 10 }), duration: 250 }
-      : { y:  0, opacity: 1,    ease: spring({ mass: 1, stiffness: 80, damping: 10 }), duration: 250 }
+      ? { y: -8, opacity: 0.45, ease: 'out(4)', duration: 380 }
+      : { y:  0, opacity: 1,    ease: 'out(4)', duration: 320 }
   )
 })
 
@@ -469,15 +469,11 @@ onUnmounted(() => {
   padding: 0.5rem 0 0.75rem;
   z-index: 10;
 }
-/* During toss: switch to fixed so the grid is guaranteed in-viewport
-   regardless of scroll position, then fade so ball aura shows through. */
+/* During toss: stay sticky so the grid holds its natural column position
+   (fixed caused a horizontal jump on desktop due to sidebar offset).
+   Opacity and translateY(-8px) are owned by Anime.js. */
 .bucket-grid-footer.grid-active {
-  position: fixed;
-  bottom: 0;
-  left: calc(50% - min(50%, 320px));
-  right: calc(50% - min(50%, 320px));
   opacity: 0.45;
-  /* translateY(-8px) is owned by Anime.js — no transform here */
 }
 
 /* ── Toss edge zones ── */

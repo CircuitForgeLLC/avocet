@@ -1,14 +1,15 @@
 import { onMounted, onUnmounted } from 'vue'
 
-const KONAMI = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a']
+const KONAMI    = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a']
+const KONAMI_AB = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','a','b']
 
-export function useKonamiCode(onActivate: () => void) {
+export function useKeySequence(sequence: string[], onActivate: () => void) {
   let pos = 0
 
   function handler(e: KeyboardEvent) {
-    if (e.key === KONAMI[pos]) {
+    if (e.key === sequence[pos]) {
       pos++
-      if (pos === KONAMI.length) {
+      if (pos === sequence.length) {
         pos = 0
         onActivate()
       }
@@ -19,6 +20,11 @@ export function useKonamiCode(onActivate: () => void) {
 
   onMounted(()   => window.addEventListener('keydown', handler))
   onUnmounted(() => window.removeEventListener('keydown', handler))
+}
+
+export function useKonamiCode(onActivate: () => void) {
+  useKeySequence(KONAMI, onActivate)
+  useKeySequence(KONAMI_AB, onActivate)
 }
 
 export function useHackerMode() {
