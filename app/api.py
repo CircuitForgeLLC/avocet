@@ -340,6 +340,75 @@ def run_benchmark(include_slow: bool = False):
     )
 
 
+# ---------------------------------------------------------------------------
+# Finetune endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/finetune/status")
+def get_finetune_status():
+    """Scan models/ for training_info.json files. Returns [] if none exist."""
+    models_dir = _ROOT / "models"
+    if not models_dir.exists():
+        return []
+    results = []
+    for sub in models_dir.iterdir():
+        if not sub.is_dir():
+            continue
+        info_path = sub / "training_info.json"
+        if not info_path.exists():
+            continue
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+            results.append(info)
+        except Exception:
+            pass
+    return results
+
+
+@app.get("/api/finetune/run")
+def run_finetune_endpoint(
+    model: str = "deberta-small",
+    epochs: int = 5,
+    score: list[str] = Query(default=[]),
+):
+    """Spawn finetune_classifier.py and stream stdout as SSE progress events."""
+    import subprocess
+
+    python_bin = "/devl/miniconda3/envs/job-seeker-classifiers/bin/python"
+    script = str(_ROOT / "scripts" / "finetune_classifier.py")
+    cmd = [python_bin, script, "--model", model, "--epochs", str(epochs)]
+    for score_file in score:
+        cmd.extend(["--score", score_file])
+
+    def generate():
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(_ROOT),
+            )
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line:
+                    yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
+            proc.wait()
+            if proc.returncode == 0:
+                yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Process exited with code {proc.returncode}'})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/fetch/stream")
 def fetch_stream(
     accounts: str = Query(default=""),
