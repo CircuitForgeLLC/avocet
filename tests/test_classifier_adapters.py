@@ -219,8 +219,9 @@ def test_finetuned_adapter_truncates_body_to_400():
         adapter.classify("Subject", long_body)
 
     call_text = mock_pipe_instance.call_args[0][0]
-    # "Subject [SEP] " prefix + 400 body chars = 414 chars max
-    assert len(call_text) <= 420
+    parts = call_text.split(" [SEP] ", 1)
+    assert len(parts) == 2, "Input must contain ' [SEP] ' separator"
+    assert len(parts[1]) == 400, f"Body must be exactly 400 chars, got {len(parts[1])}"
 
 
 def test_finetuned_adapter_returns_label_string():
