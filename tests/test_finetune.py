@@ -42,7 +42,8 @@ def test_load_and_prepare_data_formats_input_as_sep(tmp_path):
     texts, labels = load_and_prepare_data(score_file)
 
     assert texts[0].startswith("Hello [SEP] ")
-    assert len(texts[0]) <= len("Hello [SEP] ") + 400 + 5
+    parts = texts[0].split(" [SEP] ", 1)
+    assert len(parts[1]) == 400, f"Body must be exactly 400 chars, got {len(parts[1])}"
 
 
 def test_load_and_prepare_data_raises_on_missing_file():
