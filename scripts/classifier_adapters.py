@@ -291,8 +291,9 @@ class FineTunedAdapter(ClassifierAdapter):
         import scripts.classifier_adapters as _mod  # noqa: PLC0415
         _pipe_fn = _mod.pipeline
         if _pipe_fn is None:
-            raise ImportError("transformers not installed")
-        self._pipeline = _pipe_fn("text-classification", model=self._model_dir)
+            raise ImportError("transformers not installed — run: pip install transformers")
+        device = 0 if _cuda_available() else -1
+        self._pipeline = _pipe_fn("text-classification", model=self._model_dir, device=device)
 
     def unload(self) -> None:
         self._pipeline = None
