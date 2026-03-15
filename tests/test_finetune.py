@@ -362,7 +362,7 @@ def test_integration_finetune_on_example_data(tmp_path):
 
     info = json.loads(info_path.read_text())
     for key in ("name", "base_model_id", "timestamp", "epochs_run",
-                "val_macro_f1", "val_accuracy", "sample_count",
+                "val_macro_f1", "val_accuracy", "sample_count", "train_sample_count",
                 "label_counts", "score_files"):
         assert key in info, f"Missing key: {key}"
 
