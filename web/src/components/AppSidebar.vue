@@ -62,10 +62,11 @@ import { RouterLink } from 'vue-router'
 const LS_KEY = 'cf-avocet-nav-stowed'
 
 const navItems = [
-  { path: '/',         icon: '🃏', label: 'Label'    },
-  { path: '/fetch',    icon: '📥', label: 'Fetch'    },
-  { path: '/stats',    icon: '📊', label: 'Stats'    },
-  { path: '/settings', icon: '⚙️', label: 'Settings' },
+  { path: '/',          icon: '🃏', label: 'Label'     },
+  { path: '/fetch',     icon: '📥', label: 'Fetch'     },
+  { path: '/stats',     icon: '📊', label: 'Stats'     },
+  { path: '/benchmark', icon: '🏁', label: 'Benchmark' },
+  { path: '/settings',  icon: '⚙️', label: 'Settings'  },
 ]
 
 const stowed    = ref(localStorage.getItem(LS_KEY) === 'true')

@@ -86,6 +86,7 @@ const displayBody = computed(() => {
   font-size: 0.9375rem;
   line-height: 1.6;
   white-space: pre-wrap;
+  overflow-wrap: break-word;
   margin: 0;
 }
 

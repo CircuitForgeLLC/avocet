@@ -84,6 +84,8 @@ const FLING_WINDOW_MS  = 50    // rolling sample window in ms
 let velocityBuf: { x: number; y: number; t: number }[] = []
 
 function onPointerDown(e: PointerEvent) {
+  // Let clicks on interactive children (expand/collapse, links, etc.) pass through
+  if ((e.target as Element).closest('button, a, input, select, textarea')) return
   if (!motion.rich.value) return
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   pickupX.value = e.clientX

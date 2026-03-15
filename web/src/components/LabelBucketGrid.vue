@@ -1,7 +1,7 @@
 <template>
   <div class="label-grid" :class="{ 'bucket-mode': isBucketMode }" role="group" aria-label="Label buttons">
     <button
-      v-for="label in labels"
+      v-for="label in displayLabels"
       :key="label.key"
       data-testid="label-btn"
       :data-label-key="label.name"
@@ -19,6 +19,8 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+
 interface Label { name: string; emoji: string; color: string; key: string }
 
 const props = defineProps<{
@@ -27,6 +29,16 @@ const props = defineProps<{
   hoveredBucket?: string | null
 }>()
 const emit = defineEmits<{ label: [name: string] }>()
+
+// Numpad layout: reverse the row order of numeric keys (7-8-9 on top, 1-2-3 on bottom)
+// Non-numeric keys (e.g. 'h' for hired) stay pinned after the grid.
+const displayLabels = computed(() => {
+  const numeric = props.labels.filter(l => !isNaN(Number(l.key)))
+  const other   = props.labels.filter(l =>  isNaN(Number(l.key)))
+  const rows: Label[][] = []
+  for (let i = 0; i < numeric.length; i += 3) rows.push(numeric.slice(i, i + 3))
+  return [...rows.reverse().flat(), ...other]
+})
 </script>
 
 <style scoped>
@@ -38,11 +50,9 @@ const emit = defineEmits<{ label: [name: string] }>()
               padding var(--bucket-expand, 250ms cubic-bezier(0.34, 1.56, 0.64, 1));
 }
 
-/* 10th button (hired / key h) — centered below the 3×3 like a numpad 0 */
+/* 10th button (hired / key h) — full-width bar below the 3×3 */
 .label-btn:last-child {
   grid-column: 1 / -1;
-  max-width: calc(33.333% - 0.34rem);
-  justify-self: center;
 }
 
 .label-grid.bucket-mode {
