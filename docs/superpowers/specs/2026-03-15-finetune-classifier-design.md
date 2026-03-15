@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-15
 **Status:** Approved
-**Scope:** Avocet — `scripts/`, `app/api.py`, `web/src/views/BenchmarkView.vue`
+**Scope:** Avocet — `scripts/`, `app/api.py`, `web/src/views/BenchmarkView.vue`, `environment.yml`
 
 ---
 
@@ -20,6 +20,15 @@ The benchmark baseline shows zero-shot macro-F1 of 0.366 for the best models (`d
 - Target models: `cross-encoder/nli-deberta-v3-small` (100M params), `MoritzLaurer/bge-m3-zeroshot-v2.0` (600M params)
 - Output: local `models/avocet-{name}/` directory
 - UI-triggerable via web interface (SSE streaming log)
+- Stack: transformers 4.57.3, torch 2.10.0, accelerate 1.12.0, sklearn, CUDA 8.2GB
+
+---
+
+## Environment changes
+
+`environment.yml` must add:
+- `scikit-learn` — required for `train_test_split(stratify=...)` and `f1_score`
+- `peft` is NOT used by this spec; it is available in the env but not required here
 
 ---
 
@@ -27,7 +36,7 @@ The benchmark baseline shows zero-shot macro-F1 of 0.366 for the best models (`d
 
 ### New file: `scripts/finetune_classifier.py`
 
-CLI entry point for fine-tuning. Designed so stdout is SSE-streamable (all prints use `flush=True`).
+CLI entry point for fine-tuning. All prints use `flush=True` so stdout is SSE-streamable.
 
 ```
 python scripts/finetune_classifier.py --model deberta-small [--epochs 5]
@@ -37,17 +46,20 @@ Supported `--model` values: `deberta-small`, `bge-m3`
 
 **Model registry** (internal to this script):
 
-| Key | Base model ID | Max tokens | Gradient checkpointing |
-|-----|--------------|------------|----------------------|
-| `deberta-small` | `cross-encoder/nli-deberta-v3-small` | 512 | No |
-| `bge-m3` | `MoritzLaurer/bge-m3-zeroshot-v2.0` | 512 | Yes |
+| Key | Base model ID | Max tokens | fp16 | Batch size | Grad accum steps | Gradient checkpointing |
+|-----|--------------|------------|------|------------|-----------------|----------------------|
+| `deberta-small` | `cross-encoder/nli-deberta-v3-small` | 512 | No | 16 | 1 | No |
+| `bge-m3` | `MoritzLaurer/bge-m3-zeroshot-v2.0` | 512 | Yes | 4 | 4 | Yes |
+
+`bge-m3` uses `fp16=True` (halves optimizer state from ~4.8GB to ~2.4GB) with batch size 4 + gradient accumulation 4 = effective batch 16, matching `deberta-small`. These settings are required to fit within 8.2GB VRAM. Still stop Peregrine vLLM before running bge-m3 fine-tuning.
 
 ### Modified: `scripts/classifier_adapters.py`
 
 Add `FineTunedAdapter(ClassifierAdapter)`:
 - Takes `model_dir: str` (path to a `models/avocet-*/` checkpoint)
 - Loads via `pipeline("text-classification", model=model_dir)`
-- `classify()` returns the top predicted label directly (single forward pass — no per-label NLI scoring loop)
+- `classify()` input format: **`f"{subject} [SEP] {body[:400]}"`** — must match the training format exactly. Do NOT use the zero-shot adapters' `f"Subject: {subject}\n\n{body[:600]}"` format; distribution shift will degrade accuracy.
+- Returns the top predicted label directly (single forward pass — no per-label NLI scoring loop)
 - Expected inference speed: ~10–20ms/email vs 111–338ms for zero-shot
 
 ### Modified: `scripts/benchmark_classifier.py`
@@ -74,12 +86,12 @@ Scans `models/` for `training_info.json` files. Returns:
 Returns `[]` if no fine-tuned models exist.
 
 **`GET /api/finetune/run?model=deberta-small&epochs=5`**
-Spawns `finetune_classifier.py` via the `job-seeker-classifiers` Python binary. Streams stdout as SSE `{"type":"progress","message":"..."}` events. Emits `{"type":"complete"}` on clean exit, `{"type":"error","message":"..."}` on non-zero exit.
+Spawns `finetune_classifier.py` via the `job-seeker-classifiers` Python binary. Streams stdout as SSE `{"type":"progress","message":"..."}` events. Emits `{"type":"complete"}` on clean exit, `{"type":"error","message":"..."}` on non-zero exit. Same implementation pattern as `/api/benchmark/run`.
 
 ### Modified: `web/src/views/BenchmarkView.vue`
 
 **Trained models badge row** (top of view, conditional on fine-tuned models existing):
-Shows each fine-tuned model name + val macro-F1 chip.
+Shows each fine-tuned model name + val macro-F1 chip. Fetches from `/api/finetune/status` on mount.
 
 **Fine-tune section** (collapsible, below benchmark charts):
 - Dropdown: `deberta-small` | `bge-m3`
@@ -95,19 +107,25 @@ Shows each fine-tuned model name + val macro-F1 chip.
 
 1. Load `data/email_score.jsonl`
 2. Drop rows where `label` not in canonical `LABELS` (removes `profile_alert` etc.)
-3. Input text: `f"{subject} [SEP] {body[:400]}"` — fits within 512 tokens for both target models
-4. Stratified 80/20 train/val split via `sklearn.model_selection.train_test_split(stratify=labels)`
+3. Check for classes with < 2 **total** samples (before any split). Drop those classes and warn. Additionally warn — but do not skip — classes with < 5 training samples, noting eval F1 for those classes will be unreliable.
+4. Input text: `f"{subject} [SEP] {body[:400]}"` — fits within 512 tokens for both target models
+5. Stratified 80/20 train/val split via `sklearn.model_selection.train_test_split(stratify=labels)`
 
 ### Class weighting
 
-Compute per-class weights: `total_samples / (n_classes × class_count)`. Pass to a `WeightedTrainer` subclass that overrides `compute_loss`:
+Compute per-class weights: `total_samples / (n_classes × class_count)`. Pass to a `WeightedTrainer` subclass:
 
 ```python
 class WeightedTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        # **kwargs is required — absorbs num_items_in_batch added in Transformers 4.38.
+        # Do not remove it; removing it causes TypeError on the first training step.
         labels = inputs.pop("labels")
         outputs = model(**inputs)
-        loss = F.cross_entropy(outputs.logits, labels, weight=self.class_weights)
+        # Move class_weights to the same device as logits — required for GPU training.
+        # class_weights is created on CPU; logits are on cuda:0 during training.
+        weight = self.class_weights.to(outputs.logits.device)
+        loss = F.cross_entropy(outputs.logits, labels, weight=weight)
         return (loss, outputs) if return_outputs else loss
 ```
 
@@ -117,27 +135,48 @@ class WeightedTrainer(Trainer):
 AutoModelForSequenceClassification.from_pretrained(
     base_model_id,
     num_labels=10,
-    ignore_mismatched_sizes=True,   # drops NLI head, initialises fresh 10-class head
+    ignore_mismatched_sizes=True,   # see note below
     id2label=id2label,
     label2id=label2id,
 )
 ```
 
-`ignore_mismatched_sizes=True` is required because the NLI head (3 classes) is being replaced with a 10-class head.
+**Note on `ignore_mismatched_sizes=True`:** The pretrained NLI head is a 3-class linear projection. It mismatches the 10-class head constructed by `num_labels=10`, so its weights are skipped during loading. PyTorch initializes the new head from scratch using the model's default init scheme. The backbone weights load normally. Do not set this to `False` — it will raise a shape error.
 
-### Training config
+### Training config and `compute_metrics`
 
-| Hyperparameter | Value |
-|---------------|-------|
-| Epochs | 5 (default, CLI-overridable) |
-| Batch size | 16 |
-| Learning rate | 2e-5 |
-| LR schedule | Linear with 10% warmup |
-| Optimizer | AdamW |
-| Eval strategy | Every epoch |
-| Best checkpoint | By val macro-F1 |
-| Early stopping | 3 epochs without improvement |
-| Gradient checkpointing | bge-m3 only |
+The Trainer requires a `compute_metrics` callback that takes an `EvalPrediction` (logits + label_ids) and returns a dict with a `macro_f1` key. This is distinct from the existing `compute_metrics` in `classifier_adapters.py` (which operates on string predictions):
+
+```python
+def compute_metrics_for_trainer(eval_pred: EvalPrediction) -> dict:
+    logits, labels = eval_pred
+    preds = logits.argmax(axis=-1)
+    return {
+        "macro_f1": f1_score(labels, preds, average="macro", zero_division=0),
+        "accuracy": accuracy_score(labels, preds),
+    }
+```
+
+`TrainingArguments` must include:
+- `load_best_model_at_end=True`
+- `metric_for_best_model="macro_f1"`
+- `greater_is_better=True`
+
+These are required for `EarlyStoppingCallback` to work correctly. Without `load_best_model_at_end=True`, `EarlyStoppingCallback` raises `AssertionError` on init.
+
+| Hyperparameter | deberta-small | bge-m3 |
+|---------------|--------------|--------|
+| Epochs | 5 (default, CLI-overridable) | 5 |
+| Batch size | 16 | 4 |
+| Gradient accumulation | 1 | 4 (effective batch = 16) |
+| Learning rate | 2e-5 | 2e-5 |
+| LR schedule | Linear with 10% warmup | same |
+| Optimizer | AdamW | AdamW |
+| fp16 | No | Yes |
+| Gradient checkpointing | No | Yes |
+| Eval strategy | Every epoch | Every epoch |
+| Best checkpoint | By `macro_f1` | same |
+| Early stopping patience | 3 epochs | 3 epochs |
 
 ### Output
 
@@ -167,15 +206,17 @@ email_score.jsonl
       ▼
 finetune_classifier.py
   ├── drop non-canonical labels
+  ├── check for < 2 total samples per class (drop + warn)
   ├── stratified 80/20 split
   ├── tokenize (subject [SEP] body[:400])
   ├── compute class weights
-  ├── WeightedTrainer (HuggingFace Trainer subclass)
+  ├── WeightedTrainer + EarlyStoppingCallback
   └── save → models/avocet-{name}/
                     │
                     ├── FineTunedAdapter (classifier_adapters.py)
-                    │       └── pipeline("text-classification")
-                    │               └── ~10–20ms/email inference
+                    │       ├── pipeline("text-classification")
+                    │       ├── input: subject [SEP] body[:400]   ← must match training format
+                    │       └── ~10–20ms/email inference
                     │
                     └── training_info.json
                             └── /api/finetune/status
@@ -186,19 +227,21 @@ finetune_classifier.py
 
 ## Error Handling
 
-- **Insufficient data per class:** Warn and skip classes with < 2 samples in the training split (can't stratify). Log which classes were skipped.
-- **VRAM OOM:** Surface as a clear error message in the SSE stream. Suggest stopping Peregrine vLLM first.
+- **Insufficient data (< 2 total samples in a class):** Drop class before split, print warning with class name and count.
+- **Low data warning (< 5 training samples in a class):** Warn but continue; note eval F1 for that class will be unreliable.
+- **VRAM OOM on bge-m3:** Surface as clear SSE error message. Suggest stopping Peregrine vLLM first (it holds ~5.7GB).
 - **Missing score file:** Raise `FileNotFoundError` with actionable message (same pattern as `load_scoring_jsonl`).
-- **Model dir already exists:** Overwrite with a warning log line (re-running fine-tune should always produce a fresh checkpoint).
+- **Model dir already exists:** Overwrite with a warning log line. Re-running always produces a fresh checkpoint.
 
 ---
 
 ## Testing
 
-- Unit test `WeightedTrainer.compute_loss` with a mock model and known label distribution — verify loss differs from unweighted
-- Unit test `FineTunedAdapter.classify` with a mock pipeline — verify it returns a string from `LABELS`
+- Unit test `WeightedTrainer.compute_loss` with a mock model and known label distribution — verify weighted loss differs from unweighted; verify `**kwargs` does not raise `TypeError`
+- Unit test `compute_metrics_for_trainer` — verify `macro_f1` key in output, correct value on known inputs
+- Unit test `FineTunedAdapter.classify` with a mock pipeline — verify it returns a string from `LABELS` using `subject [SEP] body[:400]` format
 - Unit test auto-discovery in `benchmark_classifier.py` — mock `models/` dir with two `training_info.json` files, verify both appear in the active registry
-- Integration test: fine-tune on the `.example` JSONL (10 samples, 1 epoch) — verify `models/avocet-*/training_info.json` is written with correct keys
+- Integration test: fine-tune on `data/email_score.jsonl.example` (8 samples, 5 of 10 labels represented, 1 epoch, `--model deberta-small`). The 5 missing labels trigger the `< 2 total samples` drop path — the test must verify the drop warning is emitted for each missing label rather than treating it as a failure. Verify `models/avocet-deberta-small/training_info.json` is written with correct keys.
 
 ---
 
@@ -207,4 +250,5 @@ finetune_classifier.py
 - Pushing fine-tuned weights to HuggingFace Hub (future)
 - Cross-validation or k-fold evaluation (future — dataset too small to be meaningful now)
 - Hyperparameter search (future)
+- LoRA/PEFT adapter fine-tuning (future — relevant if model sizes grow beyond available VRAM)
 - Fine-tuning models other than `deberta-small` and `bge-m3`
