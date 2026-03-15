@@ -171,7 +171,14 @@ def discover_finetuned_models(models_dir: Path | None = None) -> list[dict]:
         info_path = sub / "training_info.json"
         if not info_path.exists():
             continue
-        info = json.loads(info_path.read_text(encoding="utf-8"))
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[discover] WARN: skipping {info_path}: {exc}", flush=True)
+            continue
+        if "name" not in info:
+            print(f"[discover] WARN: skipping {info_path}: missing 'name' key", flush=True)
+            continue
         info["model_dir"] = str(sub)
         found.append(info)
     return found

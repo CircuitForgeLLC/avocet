@@ -120,6 +120,9 @@ def test_discover_finetuned_models_finds_training_info_files(tmp_path):
     names = {r["name"] for r in results}
     assert "avocet-deberta-small" in names
     assert "avocet-bge-m3" in names
+    for r in results:
+        assert "model_dir" in r, "discover_finetuned_models must inject model_dir key"
+        assert r["model_dir"].endswith(r["name"])
 
 
 def test_discover_finetuned_models_returns_empty_when_no_models_dir():
