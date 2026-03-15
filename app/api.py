@@ -16,14 +16,21 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 _ROOT = Path(__file__).parent.parent
-_DATA_DIR: Path = _ROOT / "data"   # overridable in tests via set_data_dir()
-_CONFIG_DIR: Path | None = None    # None = use real path
+_DATA_DIR: Path = _ROOT / "data"     # overridable in tests via set_data_dir()
+_MODELS_DIR: Path = _ROOT / "models" # overridable in tests via set_models_dir()
+_CONFIG_DIR: Path | None = None      # None = use real path
 
 
 def set_data_dir(path: Path) -> None:
     """Override data directory — used by tests."""
     global _DATA_DIR
     _DATA_DIR = path
+
+
+def set_models_dir(path: Path) -> None:
+    """Override models directory — used by tests."""
+    global _MODELS_DIR
+    _MODELS_DIR = path
 
 
 def set_config_dir(path: Path | None) -> None:
@@ -347,7 +354,7 @@ def run_benchmark(include_slow: bool = False):
 @app.get("/api/finetune/status")
 def get_finetune_status():
     """Scan models/ for training_info.json files. Returns [] if none exist."""
-    models_dir = _ROOT / "models"
+    models_dir = _MODELS_DIR
     if not models_dir.exists():
         return []
     results = []
@@ -377,8 +384,12 @@ def run_finetune_endpoint(
     python_bin = "/devl/miniconda3/envs/job-seeker-classifiers/bin/python"
     script = str(_ROOT / "scripts" / "finetune_classifier.py")
     cmd = [python_bin, script, "--model", model, "--epochs", str(epochs)]
+    data_root = _DATA_DIR.resolve()
     for score_file in score:
-        cmd.extend(["--score", score_file])
+        resolved = (_DATA_DIR / score_file).resolve()
+        if not str(resolved).startswith(str(data_root)):
+            raise HTTPException(400, f"Invalid score path: {score_file!r}")
+        cmd.extend(["--score", str(resolved)])
 
     def generate():
         try:
