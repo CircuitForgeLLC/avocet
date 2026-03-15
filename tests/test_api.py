@@ -336,13 +336,13 @@ def test_finetune_status_returns_empty_when_no_models_dir(client):
     assert r.json() == []
 
 
-def test_finetune_status_returns_training_info(client):
+def test_finetune_status_returns_training_info(client, tmp_path):
     """GET /api/finetune/status must return one entry per training_info.json found."""
     import json as _json
     from app import api as api_module
 
-    models_dir = api_module._ROOT / "models" / "avocet-deberta-small-test"
-    models_dir.mkdir(parents=True, exist_ok=True)
+    models_dir = tmp_path / "models" / "avocet-deberta-small"
+    models_dir.mkdir(parents=True)
     info = {
         "name": "avocet-deberta-small",
         "base_model_id": "cross-encoder/nli-deberta-v3-small",
@@ -352,14 +352,14 @@ def test_finetune_status_returns_training_info(client):
     }
     (models_dir / "training_info.json").write_text(_json.dumps(info))
 
+    api_module.set_models_dir(tmp_path / "models")
     try:
         r = client.get("/api/finetune/status")
         assert r.status_code == 200
         data = r.json()
         assert any(d["name"] == "avocet-deberta-small" for d in data)
     finally:
-        import shutil
-        shutil.rmtree(models_dir)
+        api_module.set_models_dir(api_module._ROOT / "models")
 
 
 def test_finetune_run_streams_sse_events(client):
@@ -427,5 +427,6 @@ def test_finetune_run_passes_score_files_to_subprocess(client):
 
     assert "--score" in captured_cmd
     assert captured_cmd.count("--score") == 2
-    assert "run1.jsonl" in captured_cmd
-    assert "run2.jsonl" in captured_cmd
+    # Paths are resolved to absolute — check filenames are present as substrings
+    assert any("run1.jsonl" in arg for arg in captured_cmd)
+    assert any("run2.jsonl" in arg for arg in captured_cmd)
