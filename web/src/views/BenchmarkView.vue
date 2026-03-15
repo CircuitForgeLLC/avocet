@@ -181,7 +181,7 @@
               v-for="(line, i) in ftLog"
               :key="i"
               class="log-line"
-              :class="{ 'log-error': line.startsWith('ERROR') || line.includes('ERROR') }"
+              :class="{ 'log-error': line.startsWith('ERROR') || line.startsWith('[error]') }"
             >{{ line }}</div>
           </div>
           <p v-if="ftError" class="run-error">{{ ftError }}</p>
