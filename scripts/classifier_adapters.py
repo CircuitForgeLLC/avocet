@@ -17,6 +17,7 @@ __all__ = [
     "ZeroShotAdapter",
     "GLiClassAdapter",
     "RerankerAdapter",
+    "FineTunedAdapter",
 ]
 
 LABELS: list[str] = [
@@ -263,3 +264,42 @@ class RerankerAdapter(ClassifierAdapter):
         pairs = [[text, LABEL_DESCRIPTIONS.get(label, label.replace("_", " "))] for label in LABELS]
         scores: list[float] = self._reranker.compute_score(pairs, normalize=True)
         return LABELS[scores.index(max(scores))]
+
+
+class FineTunedAdapter(ClassifierAdapter):
+    """Loads a fine-tuned checkpoint from a local models/ directory.
+
+    Uses pipeline("text-classification") for a single forward pass.
+    Input format: 'subject [SEP] body[:400]' — must match training format exactly.
+    Expected inference speed: ~10–20ms/email vs 111–338ms for zero-shot.
+    """
+
+    def __init__(self, name: str, model_dir: str) -> None:
+        self._name = name
+        self._model_dir = model_dir
+        self._pipeline: Any = None
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def model_id(self) -> str:
+        return self._model_dir
+
+    def load(self) -> None:
+        import scripts.classifier_adapters as _mod  # noqa: PLC0415
+        _pipe_fn = _mod.pipeline
+        if _pipe_fn is None:
+            raise ImportError("transformers not installed")
+        self._pipeline = _pipe_fn("text-classification", model=self._model_dir)
+
+    def unload(self) -> None:
+        self._pipeline = None
+
+    def classify(self, subject: str, body: str) -> str:
+        if self._pipeline is None:
+            self.load()
+        text = f"{subject} [SEP] {body[:400]}"
+        result = self._pipeline(text)
+        return result[0]["label"]
