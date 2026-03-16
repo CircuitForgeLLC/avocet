@@ -14,6 +14,13 @@
         >
           {{ running ? '⏳ Running…' : results ? '🔄 Re-run' : '▶ Run Benchmark' }}
         </button>
+        <button
+          v-if="running"
+          class="btn-cancel"
+          @click="cancelBenchmark"
+        >
+          ✕ Cancel
+        </button>
       </div>
     </header>
 
@@ -36,8 +43,8 @@
     <!-- Progress log -->
     <div v-if="running || runLog.length" class="run-log">
       <div class="run-log-title">
-        <span>{{ running ? '⏳ Running benchmark…' : runError ? '❌ Failed' : '✅ Done' }}</span>
-        <button class="btn-ghost" @click="runLog = []; runError = ''">Clear</button>
+        <span>{{ running ? '⏳ Running benchmark…' : runCancelled ? '⏹ Cancelled' : runError ? '❌ Failed' : '✅ Done' }}</span>
+        <button class="btn-ghost" @click="runLog = []; runError = ''; runCancelled = false">Clear</button>
       </div>
       <div class="log-lines" ref="logEl">
         <div
@@ -169,12 +176,19 @@
           >
             {{ ftRunning ? '⏳ Training…' : '▶ Run fine-tune' }}
           </button>
+          <button
+            v-if="ftRunning"
+            class="btn-cancel"
+            @click="cancelFinetune"
+          >
+            ✕ Cancel
+          </button>
         </div>
 
         <div v-if="ftRunning || ftLog.length || ftError" class="run-log ft-log">
           <div class="run-log-title">
-            <span>{{ ftRunning ? '⏳ Training…' : ftError ? '❌ Failed' : '✅ Done' }}</span>
-            <button class="btn-ghost" @click="ftLog = []; ftError = ''">Clear</button>
+            <span>{{ ftRunning ? '⏳ Training…' : ftCancelled ? '⏹ Cancelled' : ftError ? '❌ Failed' : '✅ Done' }}</span>
+            <button class="btn-ghost" @click="ftLog = []; ftError = ''; ftCancelled = false">Clear</button>
           </div>
           <div class="log-lines" ref="ftLogEl">
             <div
@@ -248,6 +262,17 @@ const ftRunning        = ref(false)
 const ftLog            = ref<string[]>([])
 const ftError          = ref('')
 const ftLogEl          = ref<HTMLElement | null>(null)
+
+const runCancelled = ref(false)
+const ftCancelled  = ref(false)
+
+async function cancelBenchmark() {
+  await fetch('/api/benchmark/cancel', { method: 'POST' }).catch(() => {})
+}
+
+async function cancelFinetune() {
+  await fetch('/api/finetune/cancel', { method: 'POST' }).catch(() => {})
+}
 
 // ── Derived ──────────────────────────────────────────────────────────────────
 const modelNames = computed(() => Object.keys(results.value?.models ?? {}))
@@ -328,6 +353,7 @@ function startBenchmark() {
   running.value = true
   runLog.value  = []
   runError.value = ''
+  runCancelled.value = false
 
   const url = `/api/benchmark/run${includeSlow.value ? '?include_slow=true' : ''}`
   useApiSSE(
@@ -340,6 +366,10 @@ function startBenchmark() {
       }
       if (event.type === 'error' && typeof event.message === 'string') {
         runError.value = event.message
+      }
+      if (event.type === 'cancelled') {
+        running.value = false
+        runCancelled.value = true
       }
     },
     async () => {
@@ -363,6 +393,7 @@ function startFinetune() {
   ftRunning.value = true
   ftLog.value     = []
   ftError.value   = ''
+  ftCancelled.value = false
 
   const params = new URLSearchParams({ model: ftModel.value, epochs: String(ftEpochs.value) })
   useApiSSE(
@@ -375,6 +406,10 @@ function startFinetune() {
       }
       if (event.type === 'error' && typeof event.message === 'string') {
         ftError.value = event.message
+      }
+      if (event.type === 'cancelled') {
+        ftRunning.value = false
+        ftCancelled.value = true
       }
     },
     async () => {
@@ -452,6 +487,22 @@ onMounted(() => {
 }
 .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-run:not(:disabled):hover { opacity: 0.85; }
+
+.btn-cancel {
+  padding: 0.45rem 0.9rem;
+  background: transparent;
+  border: 1px solid var(--color-text-secondary, #6b7a99);
+  color: var(--color-text-secondary, #6b7a99);
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-cancel:hover {
+  background: color-mix(in srgb, var(--color-text-secondary, #6b7a99) 12%, transparent);
+}
 
 /* ── Run log ────────────────────────────────────────────── */
 .run-log {
