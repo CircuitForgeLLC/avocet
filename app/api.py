@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess as _subprocess
 import yaml
 from pathlib import Path
 
@@ -25,6 +27,34 @@ def set_data_dir(path: Path) -> None:
     """Override data directory — used by tests."""
     global _DATA_DIR
     _DATA_DIR = path
+
+
+def _best_cuda_device() -> str:
+    """Return the index of the GPU with the most free VRAM as a string.
+
+    Uses nvidia-smi so it works in the job-seeker env (no torch). Returns ""
+    if nvidia-smi is unavailable or no GPUs are found. Restricting the
+    training subprocess to a single GPU via CUDA_VISIBLE_DEVICES prevents
+    PyTorch DataParallel from replicating the model across all GPUs, which
+    would OOM the GPU with less headroom.
+    """
+    try:
+        out = _subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index,memory.free",
+             "--format=csv,noheader,nounits"],
+            text=True,
+            timeout=5,
+        )
+        best_idx, best_free = "", 0
+        for line in out.strip().splitlines():
+            parts = line.strip().split(", ")
+            if len(parts) == 2:
+                idx, free = parts[0].strip(), int(parts[1].strip())
+                if free > best_free:
+                    best_free, best_idx = free, idx
+        return best_idx
+    except Exception:
+        return ""
 
 
 def set_models_dir(path: Path) -> None:
@@ -391,7 +421,18 @@ def run_finetune_endpoint(
             raise HTTPException(400, f"Invalid score path: {score_file!r}")
         cmd.extend(["--score", str(resolved)])
 
+    # Pick the GPU with the most free VRAM. Setting CUDA_VISIBLE_DEVICES to a
+    # single device prevents DataParallel from replicating the model across all
+    # GPUs, which would force a full copy onto the more memory-constrained device.
+    proc_env = {**os.environ, "PYTORCH_ALLOC_CONF": "expandable_segments:True"}
+    best_gpu = _best_cuda_device()
+    if best_gpu:
+        proc_env["CUDA_VISIBLE_DEVICES"] = best_gpu
+
+    gpu_note = f"GPU {best_gpu}" if best_gpu else "CPU (no GPU found)"
+
     def generate():
+        yield f"data: {json.dumps({'type': 'progress', 'message': f'[api] Using {gpu_note} (most free VRAM)'})}\n\n"
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -400,6 +441,7 @@ def run_finetune_endpoint(
                 text=True,
                 bufsize=1,
                 cwd=str(_ROOT),
+                env=proc_env,
             )
             for line in proc.stdout:
                 line = line.rstrip()
