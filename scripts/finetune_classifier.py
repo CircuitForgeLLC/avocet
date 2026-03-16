@@ -42,10 +42,14 @@ _MODEL_CONFIG: dict[str, dict[str, Any]] = {
     "deberta-small": {
         "base_model_id": "cross-encoder/nli-deberta-v3-small",
         "max_tokens": 512,
+        # fp16 must stay OFF — DeBERTa-v3 disentangled attention overflows fp16.
         "fp16": False,
-        "batch_size": 16,
-        "grad_accum": 1,
-        "gradient_checkpointing": False,
+        # batch_size=8 + grad_accum=2 keeps effective batch of 16 while halving
+        # per-step activation memory. gradient_checkpointing recomputes activations
+        # on backward instead of storing them — ~60% less activation VRAM.
+        "batch_size": 8,
+        "grad_accum": 2,
+        "gradient_checkpointing": True,
     },
     "bge-m3": {
         "base_model_id": "MoritzLaurer/bge-m3-zeroshot-v2.0",
