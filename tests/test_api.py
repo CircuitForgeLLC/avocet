@@ -371,7 +371,7 @@ def test_finetune_run_streams_sse_events(client):
     mock_proc.returncode = 0
     mock_proc.wait = MagicMock()
 
-    with patch("subprocess.Popen", return_value=mock_proc):
+    with patch("app.api._subprocess.Popen",return_value=mock_proc):
         r = client.get("/api/finetune/run?model=deberta-small&epochs=1")
 
     assert r.status_code == 200
@@ -387,7 +387,7 @@ def test_finetune_run_emits_complete_on_success(client):
     mock_proc.returncode = 0
     mock_proc.wait = MagicMock()
 
-    with patch("subprocess.Popen", return_value=mock_proc):
+    with patch("app.api._subprocess.Popen",return_value=mock_proc):
         r = client.get("/api/finetune/run?model=deberta-small&epochs=1")
 
     assert '{"type": "complete"}' in r.text
@@ -402,7 +402,7 @@ def test_finetune_run_emits_error_on_nonzero_exit(client):
     mock_proc.returncode = 1
     mock_proc.wait = MagicMock()
 
-    with patch("subprocess.Popen", return_value=mock_proc):
+    with patch("app.api._subprocess.Popen",return_value=mock_proc):
         r = client.get("/api/finetune/run?model=deberta-small&epochs=1")
 
     assert '"type": "error"' in r.text
@@ -422,7 +422,7 @@ def test_finetune_run_passes_score_files_to_subprocess(client):
         m.wait = MagicMock()
         return m
 
-    with patch("subprocess.Popen", side_effect=mock_popen):
+    with patch("app.api._subprocess.Popen",side_effect=mock_popen):
         client.get("/api/finetune/run?model=deberta-small&epochs=1&score=run1.jsonl&score=run2.jsonl")
 
     assert "--score" in captured_cmd
@@ -516,13 +516,17 @@ def test_finetune_run_emits_cancelled_event(client):
     mock_proc.stdout = iter([])
     mock_proc.returncode = -15  # SIGTERM
 
-    def mock_popen(cmd, **kwargs):
-        # Simulate cancel being called after process starts
+    def mock_wait():
+        # Simulate cancel being called while the process is running (after discard clears stale flag)
         api_module._cancelled_jobs.add("finetune")
+
+    mock_proc.wait = mock_wait
+
+    def mock_popen(cmd, **kwargs):
         return mock_proc
 
     try:
-        with patch("subprocess.Popen", side_effect=mock_popen):
+        with patch("app.api._subprocess.Popen",side_effect=mock_popen):
             r = client.get("/api/finetune/run?model=deberta-small&epochs=1")
         assert '{"type": "cancelled"}' in r.text
         assert '"type": "error"' not in r.text
@@ -539,12 +543,17 @@ def test_benchmark_run_emits_cancelled_event(client):
     mock_proc.stdout = iter([])
     mock_proc.returncode = -15
 
-    def mock_popen(cmd, **kwargs):
+    def mock_wait():
+        # Simulate cancel being called while the process is running (after discard clears stale flag)
         api_module._cancelled_jobs.add("benchmark")
+
+    mock_proc.wait = mock_wait
+
+    def mock_popen(cmd, **kwargs):
         return mock_proc
 
     try:
-        with patch("subprocess.Popen", side_effect=mock_popen):
+        with patch("app.api._subprocess.Popen",side_effect=mock_popen):
             r = client.get("/api/benchmark/run")
         assert '{"type": "cancelled"}' in r.text
         assert '"type": "error"' not in r.text
