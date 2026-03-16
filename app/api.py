@@ -22,6 +22,11 @@ _DATA_DIR: Path = _ROOT / "data"     # overridable in tests via set_data_dir()
 _MODELS_DIR: Path = _ROOT / "models" # overridable in tests via set_models_dir()
 _CONFIG_DIR: Path | None = None      # None = use real path
 
+# Process registry for running jobs — used by cancel endpoints.
+# Keys: "benchmark" | "finetune". Values: the live Popen object.
+_running_procs: dict = {}
+_cancelled_jobs: set = set()
+
 
 def set_data_dir(path: Path) -> None:
     """Override data directory — used by tests."""
@@ -358,15 +363,22 @@ def run_benchmark(include_slow: bool = False):
                 bufsize=1,
                 cwd=str(_ROOT),
             )
-            for line in proc.stdout:
-                line = line.rstrip()
-                if line:
-                    yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
-            proc.wait()
-            if proc.returncode == 0:
-                yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-            else:
-                yield f"data: {json.dumps({'type': 'error', 'message': f'Process exited with code {proc.returncode}'})}\n\n"
+            _running_procs["benchmark"] = proc
+            try:
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
+                proc.wait()
+                if proc.returncode == 0:
+                    yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                elif "benchmark" in _cancelled_jobs:
+                    _cancelled_jobs.discard("benchmark")
+                    yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'Process exited with code {proc.returncode}'})}\n\n"
+            finally:
+                _running_procs.pop("benchmark", None)
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
 
@@ -443,15 +455,22 @@ def run_finetune_endpoint(
                 cwd=str(_ROOT),
                 env=proc_env,
             )
-            for line in proc.stdout:
-                line = line.rstrip()
-                if line:
-                    yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
-            proc.wait()
-            if proc.returncode == 0:
-                yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-            else:
-                yield f"data: {json.dumps({'type': 'error', 'message': f'Process exited with code {proc.returncode}'})}\n\n"
+            _running_procs["finetune"] = proc
+            try:
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
+                proc.wait()
+                if proc.returncode == 0:
+                    yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                elif "finetune" in _cancelled_jobs:
+                    _cancelled_jobs.discard("finetune")
+                    yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'Process exited with code {proc.returncode}'})}\n\n"
+            finally:
+                _running_procs.pop("finetune", None)
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
 
@@ -460,6 +479,36 @@ def run_finetune_endpoint(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/benchmark/cancel")
+def cancel_benchmark():
+    """Kill the running benchmark subprocess. 404 if none is running."""
+    proc = _running_procs.get("benchmark")
+    if proc is None:
+        raise HTTPException(404, "No benchmark is running")
+    _cancelled_jobs.add("benchmark")
+    proc.terminate()
+    try:
+        proc.wait(timeout=3)
+    except Exception:
+        proc.kill()
+    return {"status": "cancelled"}
+
+
+@app.post("/api/finetune/cancel")
+def cancel_finetune():
+    """Kill the running fine-tune subprocess. 404 if none is running."""
+    proc = _running_procs.get("finetune")
+    if proc is None:
+        raise HTTPException(404, "No finetune is running")
+    _cancelled_jobs.add("finetune")
+    proc.terminate()
+    try:
+        proc.wait(timeout=3)
+    except Exception:
+        proc.kill()
+    return {"status": "cancelled"}
 
 
 @app.get("/api/fetch/stream")

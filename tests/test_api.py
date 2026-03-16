@@ -430,3 +430,123 @@ def test_finetune_run_passes_score_files_to_subprocess(client):
     # Paths are resolved to absolute — check filenames are present as substrings
     assert any("run1.jsonl" in arg for arg in captured_cmd)
     assert any("run2.jsonl" in arg for arg in captured_cmd)
+
+
+# ---- Cancel endpoint tests ----
+
+def test_benchmark_cancel_returns_404_when_not_running(client):
+    """POST /api/benchmark/cancel must return 404 if no benchmark is running."""
+    from app import api as api_module
+    api_module._running_procs.pop("benchmark", None)
+    r = client.post("/api/benchmark/cancel")
+    assert r.status_code == 404
+
+
+def test_finetune_cancel_returns_404_when_not_running(client):
+    """POST /api/finetune/cancel must return 404 if no finetune is running."""
+    from app import api as api_module
+    api_module._running_procs.pop("finetune", None)
+    r = client.post("/api/finetune/cancel")
+    assert r.status_code == 404
+
+
+def test_benchmark_cancel_terminates_running_process(client):
+    """POST /api/benchmark/cancel must call terminate() on the running process."""
+    from unittest.mock import MagicMock
+    from app import api as api_module
+
+    mock_proc = MagicMock()
+    mock_proc.wait = MagicMock()
+    api_module._running_procs["benchmark"] = mock_proc
+
+    try:
+        r = client.post("/api/benchmark/cancel")
+        assert r.status_code == 200
+        assert r.json()["status"] == "cancelled"
+        mock_proc.terminate.assert_called_once()
+    finally:
+        api_module._running_procs.pop("benchmark", None)
+        api_module._cancelled_jobs.discard("benchmark")
+
+
+def test_finetune_cancel_terminates_running_process(client):
+    """POST /api/finetune/cancel must call terminate() on the running process."""
+    from unittest.mock import MagicMock
+    from app import api as api_module
+
+    mock_proc = MagicMock()
+    mock_proc.wait = MagicMock()
+    api_module._running_procs["finetune"] = mock_proc
+
+    try:
+        r = client.post("/api/finetune/cancel")
+        assert r.status_code == 200
+        assert r.json()["status"] == "cancelled"
+        mock_proc.terminate.assert_called_once()
+    finally:
+        api_module._running_procs.pop("finetune", None)
+        api_module._cancelled_jobs.discard("finetune")
+
+
+def test_benchmark_cancel_kills_process_on_timeout(client):
+    """POST /api/benchmark/cancel must call kill() if the process does not exit within 3 s."""
+    import subprocess
+    from unittest.mock import MagicMock
+    from app import api as api_module
+
+    mock_proc = MagicMock()
+    mock_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="benchmark", timeout=3)
+    api_module._running_procs["benchmark"] = mock_proc
+
+    try:
+        r = client.post("/api/benchmark/cancel")
+        assert r.status_code == 200
+        mock_proc.kill.assert_called_once()
+    finally:
+        api_module._running_procs.pop("benchmark", None)
+        api_module._cancelled_jobs.discard("benchmark")
+
+
+def test_finetune_run_emits_cancelled_event(client):
+    """GET /api/finetune/run must emit cancelled (not error) when job was cancelled."""
+    from unittest.mock import patch, MagicMock
+    from app import api as api_module
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = iter([])
+    mock_proc.returncode = -15  # SIGTERM
+
+    def mock_popen(cmd, **kwargs):
+        # Simulate cancel being called after process starts
+        api_module._cancelled_jobs.add("finetune")
+        return mock_proc
+
+    try:
+        with patch("subprocess.Popen", side_effect=mock_popen):
+            r = client.get("/api/finetune/run?model=deberta-small&epochs=1")
+        assert '{"type": "cancelled"}' in r.text
+        assert '"type": "error"' not in r.text
+    finally:
+        api_module._cancelled_jobs.discard("finetune")
+
+
+def test_benchmark_run_emits_cancelled_event(client):
+    """GET /api/benchmark/run must emit cancelled (not error) when job was cancelled."""
+    from unittest.mock import patch, MagicMock
+    from app import api as api_module
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = iter([])
+    mock_proc.returncode = -15
+
+    def mock_popen(cmd, **kwargs):
+        api_module._cancelled_jobs.add("benchmark")
+        return mock_proc
+
+    try:
+        with patch("subprocess.Popen", side_effect=mock_popen):
+            r = client.get("/api/benchmark/run")
+        assert '{"type": "cancelled"}' in r.text
+        assert '"type": "error"' not in r.text
+    finally:
+        api_module._cancelled_jobs.discard("benchmark")
