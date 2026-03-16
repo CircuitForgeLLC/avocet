@@ -345,8 +345,6 @@ def get_benchmark_results():
 @app.get("/api/benchmark/run")
 def run_benchmark(include_slow: bool = False):
     """Spawn the benchmark script and stream stdout as SSE progress events."""
-    import subprocess
-
     python_bin = "/devl/miniconda3/envs/job-seeker-classifiers/bin/python"
     script = str(_ROOT / "scripts" / "benchmark_classifier.py")
     cmd = [python_bin, script, "--score", "--save"]
@@ -355,15 +353,16 @@ def run_benchmark(include_slow: bool = False):
 
     def generate():
         try:
-            proc = subprocess.Popen(
+            proc = _subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 cwd=str(_ROOT),
             )
             _running_procs["benchmark"] = proc
+            _cancelled_jobs.discard("benchmark")  # clear any stale flag from a prior run
             try:
                 for line in proc.stdout:
                     line = line.rstrip()
@@ -421,8 +420,6 @@ def run_finetune_endpoint(
     score: list[str] = Query(default=[]),
 ):
     """Spawn finetune_classifier.py and stream stdout as SSE progress events."""
-    import subprocess
-
     python_bin = "/devl/miniconda3/envs/job-seeker-classifiers/bin/python"
     script = str(_ROOT / "scripts" / "finetune_classifier.py")
     cmd = [python_bin, script, "--model", model, "--epochs", str(epochs)]
@@ -446,16 +443,17 @@ def run_finetune_endpoint(
     def generate():
         yield f"data: {json.dumps({'type': 'progress', 'message': f'[api] Using {gpu_note} (most free VRAM)'})}\n\n"
         try:
-            proc = subprocess.Popen(
+            proc = _subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 cwd=str(_ROOT),
                 env=proc_env,
             )
             _running_procs["finetune"] = proc
+            _cancelled_jobs.discard("finetune")  # clear any stale flag from a prior run
             try:
                 for line in proc.stdout:
                     line = line.rstrip()
@@ -491,7 +489,7 @@ def cancel_benchmark():
     proc.terminate()
     try:
         proc.wait(timeout=3)
-    except Exception:
+    except _subprocess.TimeoutExpired:
         proc.kill()
     return {"status": "cancelled"}
 
@@ -506,7 +504,7 @@ def cancel_finetune():
     proc.terminate()
     try:
         proc.wait(timeout=3)
-    except Exception:
+    except _subprocess.TimeoutExpired:
         proc.kill()
     return {"status": "cancelled"}
 
