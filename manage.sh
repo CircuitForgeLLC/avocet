@@ -96,6 +96,7 @@ usage() {
     echo "  Vue API:"
     echo -e "    ${GREEN}start-api${NC}                Build Vue SPA + start FastAPI on port 8503"
     echo -e "    ${GREEN}stop-api${NC}                 Stop FastAPI server"
+    echo -e "    ${GREEN}restart-api${NC}              Stop + rebuild + restart FastAPI server"
     echo -e "    ${GREEN}open-api${NC}                 Open Vue UI in browser (http://localhost:8503)"
     echo ""
     echo "  Dev:"
@@ -303,6 +304,11 @@ case "$CMD" in
             warn "Stale PID file (process ${PID} not running). Cleaning up."
             rm -f "$API_PID_FILE"
         fi
+        ;;
+
+    restart-api)
+        bash "$0" stop-api
+        exec bash "$0" start-api
         ;;
 
     open-api)
