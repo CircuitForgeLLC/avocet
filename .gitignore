@@ -14,3 +14,7 @@ data/email_compare_sample.jsonl
 
 # Conda/pip artifacts
 .env
+
+# Claude context — BSL 1.1, keep out of version control
+CLAUDE.md
+docs/superpowers/
