@@ -43,7 +43,7 @@ class _TextExtractor(HTMLParser):
         return "\n".join(ln for ln in lines if ln)
 
 
-def _strip_html(html_str: str) -> str:
+def strip_html(html_str: str) -> str:
     """Convert HTML email body to plain text. Pure stdlib, no dependencies."""
     try:
         extractor = _TextExtractor()
@@ -53,7 +53,7 @@ def _strip_html(html_str: str) -> str:
         return re.sub(r"<[^>]+>", " ", html_str).strip()
 
 
-def _extract_body(msg: Any) -> str:
+def extract_body(msg: Any) -> str:
     """Return plain-text body. Strips HTML when no text/plain part exists."""
     if msg.is_multipart():
         html_fallback: str | None = None
@@ -69,7 +69,7 @@ def _extract_body(msg: Any) -> str:
                 try:
                     charset = part.get_content_charset() or "utf-8"
                     raw = part.get_payload(decode=True).decode(charset, errors="replace")
-                    html_fallback = _strip_html(raw)
+                    html_fallback = strip_html(raw)
                 except Exception:
                     pass
         return html_fallback or ""
@@ -78,7 +78,7 @@ def _extract_body(msg: Any) -> str:
             charset = msg.get_content_charset() or "utf-8"
             raw = msg.get_payload(decode=True).decode(charset, errors="replace")
             if msg.get_content_type() == "text/html":
-                return _strip_html(raw)
+                return strip_html(raw)
             return raw
         except Exception:
             pass

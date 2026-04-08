@@ -1,6 +1,6 @@
 """Avocet — IMAP fetch utilities.
 
-Shared between app/api.py (FastAPI SSE endpoint) and app/label_tool.py (Streamlit).
+Shared between app/api.py (FastAPI SSE endpoint) and the label UI.
 No Streamlit imports here — stdlib + imaplib only.
 """
 from __future__ import annotations
@@ -8,36 +8,11 @@ from __future__ import annotations
 import email as _email_lib
 import hashlib
 import imaplib
-import re
 from datetime import datetime, timedelta
 from email.header import decode_header as _raw_decode
-from html.parser import HTMLParser
 from typing import Any, Iterator
 
-
-# ── HTML → plain text ────────────────────────────────────────────────────────
-
-class _TextExtractor(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self._parts: list[str] = []
-
-    def handle_data(self, data: str) -> None:
-        stripped = data.strip()
-        if stripped:
-            self._parts.append(stripped)
-
-    def get_text(self) -> str:
-        return " ".join(self._parts)
-
-
-def strip_html(html_str: str) -> str:
-    try:
-        ex = _TextExtractor()
-        ex.feed(html_str)
-        return ex.get_text()
-    except Exception:
-        return re.sub(r"<[^>]+>", " ", html_str).strip()
+from app.utils import extract_body, strip_html  # noqa: F401 (strip_html re-exported for callers)
 
 
 # ── IMAP decode helpers ───────────────────────────────────────────────────────
@@ -53,37 +28,6 @@ def _decode_str(value: str | None) -> str:
         else:
             out.append(str(part))
     return " ".join(out).strip()
-
-
-def _extract_body(msg: Any) -> str:
-    if msg.is_multipart():
-        html_fallback: str | None = None
-        for part in msg.walk():
-            ct = part.get_content_type()
-            if ct == "text/plain":
-                try:
-                    charset = part.get_content_charset() or "utf-8"
-                    return part.get_payload(decode=True).decode(charset, errors="replace")
-                except Exception:
-                    pass
-            elif ct == "text/html" and html_fallback is None:
-                try:
-                    charset = part.get_content_charset() or "utf-8"
-                    raw = part.get_payload(decode=True).decode(charset, errors="replace")
-                    html_fallback = strip_html(raw)
-                except Exception:
-                    pass
-        return html_fallback or ""
-    else:
-        try:
-            charset = msg.get_content_charset() or "utf-8"
-            raw = msg.get_payload(decode=True).decode(charset, errors="replace")
-            if msg.get_content_type() == "text/html":
-                return strip_html(raw)
-            return raw
-        except Exception:
-            pass
-    return ""
 
 
 def entry_key(e: dict) -> str:
@@ -193,7 +137,7 @@ def fetch_account_stream(
             subj      = _decode_str(msg.get("Subject", ""))
             from_addr = _decode_str(msg.get("From", ""))
             date      = _decode_str(msg.get("Date", ""))
-            body      = _extract_body(msg)[:800]
+            body      = extract_body(msg)[:800]
             entry     = {"subject": subj, "body": body, "from_addr": from_addr,
                          "date": date, "account": name}
             k = entry_key(entry)
