@@ -80,10 +80,16 @@ def test_import_run_deduplicates_on_id(tmp_path):
     assert len(lines) == 2  # no duplicates
 
 
-def test_import_run_skips_records_missing_id(tmp_path):
+def test_import_run_skips_records_missing_id(tmp_path, caplog):
+    import logging
     from scripts.sft_import import import_run
     sft_path = tmp_path / "run1" / "sft_candidates.jsonl"
-    bad = {"source": "cf-orch-benchmark", "status": "needs_review"}  # no id
-    _write_candidates(sft_path, [bad, _make_record("a")])
-    result = import_run(sft_path, tmp_path)
+    sft_path.parent.mkdir()
+    sft_path.write_text(
+        json.dumps({"model_response": "bad", "status": "needs_review"}) + "\n"
+        + json.dumps({"id": "abc123", "model_response": "good", "status": "needs_review"}) + "\n"
+    )
+    with caplog.at_level(logging.WARNING, logger="scripts.sft_import"):
+        result = import_run(sft_path, tmp_path)
     assert result == {"imported": 1, "skipped": 0}
+    assert "missing 'id'" in caplog.text

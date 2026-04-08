@@ -6,7 +6,10 @@ Used by app/sft.py endpoints and can be run standalone.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _CANDIDATES_FILENAME = "sft_candidates.jsonl"
 
@@ -56,6 +59,7 @@ def import_run(sft_path: Path, data_dir: Path) -> dict[str, int]:
     skipped = 0
     for record in _read_jsonl(sft_path):
         if "id" not in record:
+            logger.warning("Skipping record missing 'id' field in %s", sft_path)
             continue  # malformed — skip without crashing
         if record["id"] in existing_ids:
             skipped += 1
