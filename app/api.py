@@ -142,6 +142,9 @@ def _normalize(item: dict) -> dict:
 
 app = FastAPI(title="Avocet API")
 
+from app.sft import router as sft_router
+app.include_router(sft_router, prefix="/api/sft")
+
 # In-memory last-action store (single user, local tool — in-memory is fine)
 _last_action: dict | None = None
 
