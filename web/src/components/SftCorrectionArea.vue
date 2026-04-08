@@ -10,7 +10,7 @@
       class="correction-textarea"
       aria-label="Write corrected response"
       aria-required="true"
-      :aria-describedby="describedBy"
+      :aria-describedby="describedBy || undefined"
       placeholder="Write the response this model should have given..."
       rows="4"
       @keydown.escape="$emit('cancel')"

@@ -59,4 +59,10 @@ describe('SftCorrectionArea', () => {
     await w.find('textarea').trigger('keydown', { key: 'Enter', ctrlKey: true })
     expect(w.emitted('submit')).toBeFalsy()
   })
+
+  it('omits aria-describedby when describedBy prop is not provided', () => {
+    const w = mount(SftCorrectionArea)
+    const textarea = w.find('textarea')
+    expect(textarea.attributes('aria-describedby')).toBeUndefined()
+  })
 })
