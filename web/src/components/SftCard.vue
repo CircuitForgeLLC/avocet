@@ -17,7 +17,7 @@
     </div>
 
     <!-- Failure reason -->
-    <p class="failure-reason">{{ item.failure_reason }}</p>
+    <p v-if="item.failure_reason" class="failure-reason">{{ item.failure_reason }}</p>
 
     <!-- Prompt (collapsible) -->
     <div class="prompt-section">

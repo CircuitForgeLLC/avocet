@@ -52,7 +52,7 @@ describe('SftCard', () => {
     expect(w.find('[data-testid="quality-chip"]').classes()).toContain('quality-low')
   })
 
-  it('quality chip has mid-quality class when score 0.4-0.7', () => {
+  it('quality chip has mid-quality class when score is 0.4 to <0.7', () => {
     const w = mount(SftCard, { props: { item: MID_QUALITY_ITEM } })
     expect(w.find('[data-testid="quality-chip"]').classes()).toContain('quality-mid')
   })
@@ -88,5 +88,11 @@ describe('SftCard', () => {
   it('correction area shown when correcting prop is true', () => {
     const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM, correcting: true } })
     expect(w.find('[data-testid="correction-area"]').exists()).toBe(true)
+  })
+
+  it('renders nothing for failure reason when null', () => {
+    const item = { ...LOW_QUALITY_ITEM, failure_reason: null }
+    const w = mount(SftCard, { props: { item } })
+    expect(w.find('.failure-reason').exists()).toBe(false)
   })
 })
