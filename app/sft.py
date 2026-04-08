@@ -80,6 +80,15 @@ def _write_candidates(records: list[dict]) -> None:
     write_jsonl(_candidates_file(), records)
 
 
+def _is_exportable(r: dict) -> bool:
+    """Return True if an approved record is ready to include in SFT export."""
+    return (
+        r.get("status") == "approved"
+        and bool(r.get("corrected_response"))
+        and str(r["corrected_response"]).strip() != ""
+    )
+
+
 # ── GET /runs ──────────────────────────────────────────────────────────────
 
 @router.get("/runs")
@@ -211,15 +220,9 @@ def post_undo(req: UndoRequest):
 # ── GET /export ─────────────────────────────────────────────────────────────
 
 @router.get("/export")
-def get_export():
+def get_export() -> StreamingResponse:
     """Stream approved records as SFT-ready JSONL for download."""
-    approved = read_jsonl(_approved_file())
-    exportable = [
-        r for r in approved
-        if r.get("status") == "approved"
-        and r.get("corrected_response")
-        and str(r["corrected_response"]).strip()
-    ]
+    exportable = [r for r in read_jsonl(_approved_file()) if _is_exportable(r)]
 
     def generate():
         for r in exportable:
@@ -243,7 +246,7 @@ def get_export():
 # ── GET /stats ──────────────────────────────────────────────────────────────
 
 @router.get("/stats")
-def get_stats():
+def get_stats() -> dict[str, object]:
     """Return counts by status, model, and task type."""
     records = _read_candidates()
     by_status: dict[str, int] = {}
@@ -259,10 +262,7 @@ def get_stats():
         by_task_type[task_type] = by_task_type.get(task_type, 0) + 1
 
     approved = read_jsonl(_approved_file())
-    export_ready = sum(
-        1 for r in approved
-        if r.get("corrected_response") and str(r["corrected_response"]).strip()
-    )
+    export_ready = sum(1 for r in approved if _is_exportable(r))
 
     return {
         "total": len(records),
