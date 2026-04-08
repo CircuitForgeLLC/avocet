@@ -9,12 +9,15 @@ set_sft_config_dir() in test fixtures.
 """
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 import yaml
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.utils import append_jsonl, read_jsonl, write_jsonl
@@ -203,3 +206,68 @@ def post_undo(req: UndoRequest):
         write_jsonl(_approved_file(), [r for r in approved if r.get("id") != req.id])
 
     return {"ok": True}
+
+
+# ── GET /export ─────────────────────────────────────────────────────────────
+
+@router.get("/export")
+def get_export():
+    """Stream approved records as SFT-ready JSONL for download."""
+    approved = read_jsonl(_approved_file())
+    exportable = [
+        r for r in approved
+        if r.get("status") == "approved"
+        and r.get("corrected_response")
+        and str(r["corrected_response"]).strip()
+    ]
+
+    def generate():
+        for r in exportable:
+            record = {
+                "messages": r.get("prompt_messages", []) + [
+                    {"role": "assistant", "content": r["corrected_response"]}
+                ]
+            }
+            yield json.dumps(record) + "\n"
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={
+            "Content-Disposition": f'attachment; filename="sft_export_{timestamp}.jsonl"'
+        },
+    )
+
+
+# ── GET /stats ──────────────────────────────────────────────────────────────
+
+@router.get("/stats")
+def get_stats():
+    """Return counts by status, model, and task type."""
+    records = _read_candidates()
+    by_status: dict[str, int] = {}
+    by_model: dict[str, int] = {}
+    by_task_type: dict[str, int] = {}
+
+    for r in records:
+        status = r.get("status", "unknown")
+        by_status[status] = by_status.get(status, 0) + 1
+        model = r.get("model_name", "unknown")
+        by_model[model] = by_model.get(model, 0) + 1
+        task_type = r.get("task_type", "unknown")
+        by_task_type[task_type] = by_task_type.get(task_type, 0) + 1
+
+    approved = read_jsonl(_approved_file())
+    export_ready = sum(
+        1 for r in approved
+        if r.get("corrected_response") and str(r["corrected_response"]).strip()
+    )
+
+    return {
+        "total": len(records),
+        "by_status": by_status,
+        "by_model": by_model,
+        "by_task_type": by_task_type,
+        "export_ready": export_ready,
+    }

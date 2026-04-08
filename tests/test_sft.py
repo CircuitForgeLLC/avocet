@@ -260,3 +260,83 @@ def test_undo_already_needs_review_returns_409(client, tmp_path):
     _populate_candidates(tmp_path, [_make_record("a")])
     r = client.post("/api/sft/undo", json={"id": "a"})
     assert r.status_code == 409
+
+
+# ── /api/sft/export ──────────────────────────────────────────────────────────
+
+def test_export_returns_approved_as_sft_jsonl(client, tmp_path):
+    from app import sft as sft_module
+    from app.utils import write_jsonl
+    approved = {
+        **_make_record("a"),
+        "status": "approved",
+        "corrected_response": "def add(a, b): return a + b",
+        "prompt_messages": [
+            {"role": "system", "content": "You are a coding assistant."},
+            {"role": "user", "content": "Write a Python add function."},
+        ],
+    }
+    write_jsonl(sft_module._approved_file(), [approved])
+    _populate_candidates(tmp_path, [approved])
+
+    r = client.get("/api/sft/export")
+    assert r.status_code == 200
+    assert "application/x-ndjson" in r.headers["content-type"]
+    lines = [l for l in r.text.splitlines() if l.strip()]
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["messages"][-1] == {
+        "role": "assistant", "content": "def add(a, b): return a + b"
+    }
+    assert record["messages"][0]["role"] == "system"
+    assert record["messages"][1]["role"] == "user"
+
+
+def test_export_excludes_non_approved(client, tmp_path):
+    from app import sft as sft_module
+    from app.utils import write_jsonl
+    records = [
+        {**_make_record("a"), "status": "discarded", "corrected_response": None},
+        {**_make_record("b"), "status": "needs_review", "corrected_response": None},
+    ]
+    write_jsonl(sft_module._approved_file(), records)
+    r = client.get("/api/sft/export")
+    assert r.text.strip() == ""
+
+
+def test_export_empty_when_no_approved_file(client):
+    r = client.get("/api/sft/export")
+    assert r.status_code == 200
+    assert r.text.strip() == ""
+
+
+# ── /api/sft/stats ───────────────────────────────────────────────────────────
+
+def test_stats_counts_by_status(client, tmp_path):
+    from app import sft as sft_module
+    from app.utils import write_jsonl
+    records = [
+        _make_record("a"),
+        {**_make_record("b"), "status": "approved", "corrected_response": "ok"},
+        {**_make_record("c"), "status": "discarded"},
+        {**_make_record("d"), "status": "model_rejected"},
+    ]
+    _populate_candidates(tmp_path, records)
+    write_jsonl(sft_module._approved_file(), [records[1]])
+    r = client.get("/api/sft/stats")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 4
+    assert data["by_status"]["needs_review"] == 1
+    assert data["by_status"]["approved"] == 1
+    assert data["by_status"]["discarded"] == 1
+    assert data["by_status"]["model_rejected"] == 1
+    assert data["export_ready"] == 1
+
+
+def test_stats_empty_when_no_data(client):
+    r = client.get("/api/sft/stats")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 0
+    assert data["export_ready"] == 0
