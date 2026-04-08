@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from fastapi import APIRouter, HTTPException
@@ -140,15 +141,13 @@ def get_queue(page: int = 1, per_page: int = 20):
 
 class SubmitRequest(BaseModel):
     id: str
-    action: str  # "correct" | "discard" | "flag"
+    action: Literal["correct", "discard", "flag"]
     corrected_response: str | None = None
 
 
 @router.post("/submit")
 def post_submit(req: SubmitRequest):
     """Record a reviewer decision for one SFT candidate."""
-    if req.action not in ("correct", "discard", "flag"):
-        raise HTTPException(422, f"Unknown action {req.action!r}")
     if req.action == "correct":
         if not req.corrected_response or not req.corrected_response.strip():
             raise HTTPException(422, "corrected_response must be non-empty when action is 'correct'")
