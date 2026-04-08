@@ -116,3 +116,147 @@ def test_import_unknown_run_returns_404(client, tmp_path):
     _write_config(tmp_path, tmp_path / "bench_results")
     r = client.post("/api/sft/import", json={"run_id": "nonexistent"})
     assert r.status_code == 404
+
+
+# ── /api/sft/queue ──────────────────────────────────────────────────────────
+
+def _populate_candidates(tmp_path, records: list[dict]) -> None:
+    from app import sft as sft_module
+    path = sft_module._candidates_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8"
+    )
+
+
+def test_queue_returns_needs_review_only(client, tmp_path):
+    records = [
+        _make_record("a"),                                         # needs_review
+        {**_make_record("b"), "status": "approved"},              # should not appear
+        {**_make_record("c"), "status": "discarded"},             # should not appear
+    ]
+    _populate_candidates(tmp_path, records)
+    r = client.get("/api/sft/queue")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+    assert data["items"][0]["id"] == "a"
+
+
+def test_queue_pagination(client, tmp_path):
+    records = [_make_record(str(i)) for i in range(25)]
+    _populate_candidates(tmp_path, records)
+    r = client.get("/api/sft/queue?page=1&per_page=10")
+    data = r.json()
+    assert data["total"] == 25
+    assert len(data["items"]) == 10
+    r2 = client.get("/api/sft/queue?page=3&per_page=10")
+    assert len(r2.json()["items"]) == 5
+
+
+def test_queue_empty_when_no_file(client):
+    r = client.get("/api/sft/queue")
+    assert r.status_code == 200
+    assert r.json() == {"items": [], "total": 0, "page": 1, "per_page": 20}
+
+
+# ── /api/sft/submit ─────────────────────────────────────────────────────────
+
+def test_submit_correct_sets_approved(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    r = client.post("/api/sft/submit", json={
+        "id": "a", "action": "correct",
+        "corrected_response": "def add(a, b): return a + b",
+    })
+    assert r.status_code == 200
+    from app import sft as sft_module
+    records = sft_module._read_candidates()
+    assert records[0]["status"] == "approved"
+    assert records[0]["corrected_response"] == "def add(a, b): return a + b"
+
+
+def test_submit_correct_also_appends_to_approved_file(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    client.post("/api/sft/submit", json={
+        "id": "a", "action": "correct",
+        "corrected_response": "def add(a, b): return a + b",
+    })
+    from app import sft as sft_module
+    from app.utils import read_jsonl
+    approved = read_jsonl(sft_module._approved_file())
+    assert len(approved) == 1
+    assert approved[0]["id"] == "a"
+
+
+def test_submit_discard_sets_discarded(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    r = client.post("/api/sft/submit", json={"id": "a", "action": "discard"})
+    assert r.status_code == 200
+    from app import sft as sft_module
+    assert sft_module._read_candidates()[0]["status"] == "discarded"
+
+
+def test_submit_flag_sets_model_rejected(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    r = client.post("/api/sft/submit", json={"id": "a", "action": "flag"})
+    assert r.status_code == 200
+    from app import sft as sft_module
+    assert sft_module._read_candidates()[0]["status"] == "model_rejected"
+
+
+def test_submit_correct_empty_response_returns_422(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    r = client.post("/api/sft/submit", json={
+        "id": "a", "action": "correct", "corrected_response": "   ",
+    })
+    assert r.status_code == 422
+
+
+def test_submit_correct_null_response_returns_422(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    r = client.post("/api/sft/submit", json={
+        "id": "a", "action": "correct", "corrected_response": None,
+    })
+    assert r.status_code == 422
+
+
+def test_submit_unknown_id_returns_404(client, tmp_path):
+    r = client.post("/api/sft/submit", json={"id": "nope", "action": "discard"})
+    assert r.status_code == 404
+
+
+def test_submit_already_approved_returns_409(client, tmp_path):
+    _populate_candidates(tmp_path, [{**_make_record("a"), "status": "approved"}])
+    r = client.post("/api/sft/submit", json={"id": "a", "action": "discard"})
+    assert r.status_code == 409
+
+
+# ── /api/sft/undo ────────────────────────────────────────────────────────────
+
+def test_undo_restores_discarded_to_needs_review(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    client.post("/api/sft/submit", json={"id": "a", "action": "discard"})
+    r = client.post("/api/sft/undo", json={"id": "a"})
+    assert r.status_code == 200
+    from app import sft as sft_module
+    assert sft_module._read_candidates()[0]["status"] == "needs_review"
+
+
+def test_undo_removes_approved_from_approved_file(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    client.post("/api/sft/submit", json={
+        "id": "a", "action": "correct",
+        "corrected_response": "def add(a, b): return a + b",
+    })
+    client.post("/api/sft/undo", json={"id": "a"})
+    from app import sft as sft_module
+    from app.utils import read_jsonl
+    approved = read_jsonl(sft_module._approved_file())
+    assert not any(r["id"] == "a" for r in approved)
+
+
+def test_undo_already_needs_review_returns_409(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    r = client.post("/api/sft/undo", json={"id": "a"})
+    assert r.status_code == 409

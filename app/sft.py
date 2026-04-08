@@ -118,3 +118,89 @@ def post_import(req: ImportRequest):
     if run is None:
         raise HTTPException(404, f"Run {req.run_id!r} not found in bench_results_dir")
     return import_run(run["sft_path"], _SFT_DATA_DIR)
+
+
+# ── GET /queue ─────────────────────────────────────────────────────────────
+
+@router.get("/queue")
+def get_queue(page: int = 1, per_page: int = 20):
+    """Return paginated needs_review candidates."""
+    records = _read_candidates()
+    pending = [r for r in records if r.get("status") == "needs_review"]
+    start = (page - 1) * per_page
+    return {
+        "items": pending[start:start + per_page],
+        "total": len(pending),
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+# ── POST /submit ───────────────────────────────────────────────────────────
+
+class SubmitRequest(BaseModel):
+    id: str
+    action: str  # "correct" | "discard" | "flag"
+    corrected_response: str | None = None
+
+
+@router.post("/submit")
+def post_submit(req: SubmitRequest):
+    """Record a reviewer decision for one SFT candidate."""
+    if req.action not in ("correct", "discard", "flag"):
+        raise HTTPException(422, f"Unknown action {req.action!r}")
+    if req.action == "correct":
+        if not req.corrected_response or not req.corrected_response.strip():
+            raise HTTPException(422, "corrected_response must be non-empty when action is 'correct'")
+
+    records = _read_candidates()
+    idx = next((i for i, r in enumerate(records) if r.get("id") == req.id), None)
+    if idx is None:
+        raise HTTPException(404, f"Record {req.id!r} not found")
+
+    record = records[idx]
+    if record.get("status") != "needs_review":
+        raise HTTPException(409, f"Record is not in needs_review state (current: {record.get('status')})")
+
+    if req.action == "correct":
+        records[idx] = {**record, "status": "approved", "corrected_response": req.corrected_response}
+        _write_candidates(records)
+        append_jsonl(_approved_file(), records[idx])
+    elif req.action == "discard":
+        records[idx] = {**record, "status": "discarded"}
+        _write_candidates(records)
+    else:  # flag
+        records[idx] = {**record, "status": "model_rejected"}
+        _write_candidates(records)
+
+    return {"ok": True}
+
+
+# ── POST /undo ─────────────────────────────────────────────────────────────
+
+class UndoRequest(BaseModel):
+    id: str
+
+
+@router.post("/undo")
+def post_undo(req: UndoRequest):
+    """Restore a previously actioned candidate back to needs_review."""
+    records = _read_candidates()
+    idx = next((i for i, r in enumerate(records) if r.get("id") == req.id), None)
+    if idx is None:
+        raise HTTPException(404, f"Record {req.id!r} not found")
+
+    record = records[idx]
+    old_status = record.get("status")
+    if old_status == "needs_review":
+        raise HTTPException(409, "Record is already in needs_review state")
+
+    records[idx] = {**record, "status": "needs_review", "corrected_response": None}
+    _write_candidates(records)
+
+    # If it was approved, remove from the approved file too
+    if old_status == "approved":
+        approved = read_jsonl(_approved_file())
+        write_jsonl(_approved_file(), [r for r in approved if r.get("id") != req.id])
+
+    return {"ok": True}
