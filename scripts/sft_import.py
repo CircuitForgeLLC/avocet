@@ -52,8 +52,7 @@ def import_run(sft_path: Path, data_dir: Path) -> dict[str, int]:
     Returns {imported: N, skipped: M}.
     """
     dest = data_dir / _CANDIDATES_FILENAME
-    existing = _read_jsonl(dest)
-    existing_ids = {r["id"] for r in existing if "id" in r}
+    existing_ids = _read_existing_ids(dest)
 
     new_records: list[dict] = []
     skipped = 0
@@ -87,6 +86,25 @@ def _read_jsonl(path: Path) -> list[dict]:
             continue
         try:
             records.append(json.loads(line))
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as exc:
+            logger.warning("Skipping malformed JSON line in %s: %s", path, exc)
     return records
+
+
+def _read_existing_ids(path: Path) -> set[str]:
+    """Read only the id field from each line of a JSONL file."""
+    if not path.exists():
+        return set()
+    ids: set[str] = set()
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+                if "id" in record:
+                    ids.add(record["id"])
+            except json.JSONDecodeError:
+                pass  # corrupt line, skip silently (ids file is our own output)
+    return ids
