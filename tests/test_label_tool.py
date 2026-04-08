@@ -5,7 +5,7 @@ These functions are stdlib-only and safe to test without an IMAP connection.
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from app.label_tool import _extract_body, _strip_html
+from app.utils import _extract_body, _strip_html
 
 
 # ── _strip_html ──────────────────────────────────────────────────────────────
