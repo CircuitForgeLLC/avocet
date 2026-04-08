@@ -5,8 +5,10 @@ These are reused by the FastAPI backend and the test suite.
 """
 from __future__ import annotations
 
+import json
 import re
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any
 
 
@@ -83,3 +85,33 @@ def extract_body(msg: Any) -> str:
         except Exception:
             pass
     return ""
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    """Read a JSONL file, returning valid records. Skips blank lines and malformed JSON."""
+    if not path.exists():
+        return []
+    records: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass
+    return records
+
+
+def write_jsonl(path: Path, records: list[dict]) -> None:
+    """Write records to a JSONL file, overwriting any existing content."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = "\n".join(json.dumps(r) for r in records)
+    path.write_text(content + ("\n" if records else ""), encoding="utf-8")
+
+
+def append_jsonl(path: Path, record: dict) -> None:
+    """Append a single record to a JSONL file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\n")

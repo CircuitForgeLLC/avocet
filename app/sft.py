@@ -9,12 +9,16 @@ set_sft_config_dir() in test fixtures.
 """
 from __future__ import annotations
 
-import json
+import logging
 from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from app.utils import append_jsonl, read_jsonl, write_jsonl
+
+logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).parent.parent
 _SFT_DATA_DIR: Path = _ROOT / "data"
@@ -47,7 +51,11 @@ def _get_bench_results_dir() -> Path:
     f = _config_file()
     if not f.exists():
         return Path("/nonexistent-bench-results")
-    raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    try:
+        raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        logger.warning("Failed to parse SFT config %s: %s", f, exc)
+        return Path("/nonexistent-bench-results")
     d = raw.get("sft", {}).get("bench_results_dir", "")
     return Path(d) if d else Path("/nonexistent-bench-results")
 
@@ -60,39 +68,12 @@ def _approved_file() -> Path:
     return _SFT_DATA_DIR / "sft_approved.jsonl"
 
 
-def _read_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    records: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            records.append(json.loads(line))
-        except json.JSONDecodeError:
-            pass
-    return records
-
-
-def _write_jsonl(path: Path, records: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = "\n".join(json.dumps(r) for r in records)
-    path.write_text(content + ("\n" if records else ""), encoding="utf-8")
-
-
-def _append_jsonl(path: Path, record: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record) + "\n")
-
-
 def _read_candidates() -> list[dict]:
-    return _read_jsonl(_candidates_file())
+    return read_jsonl(_candidates_file())
 
 
 def _write_candidates(records: list[dict]) -> None:
-    _write_jsonl(_candidates_file(), records)
+    write_jsonl(_candidates_file(), records)
 
 
 # ── GET /runs ──────────────────────────────────────────────────────────────
@@ -103,7 +84,12 @@ def get_runs():
     from scripts.sft_import import discover_runs
     bench_dir = _get_bench_results_dir()
     existing = _read_candidates()
-    imported_run_ids = {r.get("benchmark_run_id") for r in existing}
+    # benchmark_run_id in each record equals the run's directory name by cf-orch convention
+    imported_run_ids = {
+        r["benchmark_run_id"]
+        for r in existing
+        if r.get("benchmark_run_id") is not None
+    }
     runs = discover_runs(bench_dir)
     return [
         {
