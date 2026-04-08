@@ -12,7 +12,7 @@ export interface SftQueueItem {
   model_response: string
   corrected_response: string | null
   quality_score: number          // 0.0 to 1.0
-  failure_reason: string
+  failure_reason: string | null
   task_id: string
   task_type: string
   task_name: string
