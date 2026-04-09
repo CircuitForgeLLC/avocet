@@ -146,6 +146,7 @@ from app.sft import router as sft_router
 app.include_router(sft_router, prefix="/api/sft")
 
 from app.models import router as models_router
+import app.models as _models_module
 app.include_router(models_router, prefix="/api/models")
 
 # In-memory last-action store (single user, local tool — in-memory is fine)
@@ -301,10 +302,18 @@ def get_stats():
         lbl = r.get("label", "")
         if lbl:
             counts[lbl] = counts.get(lbl, 0) + 1
+    benchmark_results: dict = {}
+    benchmark_path = _DATA_DIR / "benchmark_results.json"
+    if benchmark_path.exists():
+        try:
+            benchmark_results = json.loads(benchmark_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
     return {
         "total": len(records),
         "counts": counts,
         "score_file_bytes": _score_file().stat().st_size if _score_file().exists() else 0,
+        "benchmark_results": benchmark_results,
     }
 
 
@@ -339,6 +348,36 @@ from fastapi.responses import StreamingResponse
 # Benchmark endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/api/benchmark/models")
+def get_benchmark_models() -> dict:
+    """Return installed models grouped by adapter_type category."""
+    models_dir: Path = _models_module._MODELS_DIR
+    categories: dict[str, list[dict]] = {
+        "ZeroShotAdapter": [],
+        "RerankerAdapter": [],
+        "GenerationAdapter": [],
+        "Unknown": [],
+    }
+    if models_dir.exists():
+        for sub in models_dir.iterdir():
+            if not sub.is_dir():
+                continue
+            info_path = sub / "model_info.json"
+            adapter_type = "Unknown"
+            repo_id: str | None = None
+            if info_path.exists():
+                try:
+                    info = json.loads(info_path.read_text(encoding="utf-8"))
+                    adapter_type = info.get("adapter_type") or info.get("adapter_recommendation") or "Unknown"
+                    repo_id = info.get("repo_id")
+                except Exception:
+                    pass
+            bucket = adapter_type if adapter_type in categories else "Unknown"
+            entry: dict = {"name": sub.name, "repo_id": repo_id, "adapter_type": adapter_type}
+            categories[bucket].append(entry)
+    return {"categories": categories}
+
+
 @app.get("/api/benchmark/results")
 def get_benchmark_results():
     """Return the most recently saved benchmark results, or an empty envelope."""
@@ -349,13 +388,17 @@ def get_benchmark_results():
 
 
 @app.get("/api/benchmark/run")
-def run_benchmark(include_slow: bool = False):
+def run_benchmark(include_slow: bool = False, model_names: str = ""):
     """Spawn the benchmark script and stream stdout as SSE progress events."""
     python_bin = "/devl/miniconda3/envs/job-seeker-classifiers/bin/python"
     script = str(_ROOT / "scripts" / "benchmark_classifier.py")
     cmd = [python_bin, script, "--score", "--save"]
     if include_slow:
         cmd.append("--include-slow")
+    if model_names:
+        names = [n.strip() for n in model_names.split(",") if n.strip()]
+        if names:
+            cmd.extend(["--models"] + names)
 
     def generate():
         try:

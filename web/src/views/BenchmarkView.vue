@@ -24,6 +24,54 @@
       </div>
     </header>
 
+    <!-- Model Picker -->
+    <details class="model-picker" ref="pickerEl">
+      <summary class="picker-summary">
+        <span class="picker-title">🎯 Model Selection</span>
+        <span class="picker-badge">{{ pickerSummaryText }}</span>
+      </summary>
+      <div class="picker-body">
+        <div v-if="modelsLoading" class="picker-loading">Loading models…</div>
+        <div v-else-if="Object.keys(modelCategories).length === 0" class="picker-empty">
+          No models found — check API connection.
+        </div>
+        <template v-else>
+          <div
+            v-for="(models, category) in modelCategories"
+            :key="category"
+            class="picker-category"
+          >
+            <label class="picker-cat-header">
+              <input
+                type="checkbox"
+                :checked="isCategoryAllSelected(models)"
+                :indeterminate="isCategoryIndeterminate(models)"
+                @change="toggleCategory(models, ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="picker-cat-name">{{ category }}</span>
+              <span class="picker-cat-count">({{ models.length }})</span>
+            </label>
+            <div v-if="models.length === 0" class="picker-no-models">No models installed</div>
+            <div v-else class="picker-model-list">
+              <label
+                v-for="m in models"
+                :key="m.name"
+                class="picker-model-row"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedModels.has(m.name)"
+                  @change="toggleModel(m.name, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="picker-model-name" :title="m.repo_id ?? m.name">{{ m.name }}</span>
+                <span class="picker-adapter-type">{{ m.adapter_type }}</span>
+              </label>
+            </div>
+          </div>
+        </template>
+      </div>
+    </details>
+
     <!-- Trained models badge row -->
     <div v-if="fineTunedModels.length > 0" class="trained-models-row">
       <span class="trained-label">Trained:</span>
@@ -224,6 +272,16 @@ const LABEL_META: Record<string, { emoji: string }> = {
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
+interface AvailableModel {
+  name: string
+  repo_id?: string
+  adapter_type: string
+}
+
+interface ModelCategoriesResponse {
+  categories: Record<string, AvailableModel[]>
+}
+
 interface FineTunedModel {
   name: string
   base_model_id?: string
@@ -254,6 +312,13 @@ const runError    = ref('')
 const includeSlow = ref(false)
 const logEl       = ref<HTMLElement | null>(null)
 
+// Model picker state
+const modelCategories = ref<Record<string, AvailableModel[]>>({})
+const selectedModels  = ref<Set<string>>(new Set())
+const allModels       = ref<string[]>([])
+const modelsLoading   = ref(false)
+const pickerEl        = ref<HTMLDetailsElement | null>(null)
+
 // Fine-tune state
 const fineTunedModels  = ref<FineTunedModel[]>([])
 const ftModel          = ref('deberta-small')
@@ -272,6 +337,52 @@ async function cancelBenchmark() {
 
 async function cancelFinetune() {
   await fetch('/api/finetune/cancel', { method: 'POST' }).catch(() => {})
+}
+
+// ── Model picker computed ─────────────────────────────────────────────────────
+const pickerSummaryText = computed(() => {
+  const total = allModels.value.length
+  if (total === 0) return 'No models available'
+  const selected = selectedModels.value.size
+  if (selected === total) return `All models (${total})`
+  return `${selected} of ${total} selected`
+})
+
+function isCategoryAllSelected(models: AvailableModel[]): boolean {
+  return models.length > 0 && models.every(m => selectedModels.value.has(m.name))
+}
+
+function isCategoryIndeterminate(models: AvailableModel[]): boolean {
+  const someSelected = models.some(m => selectedModels.value.has(m.name))
+  return someSelected && !isCategoryAllSelected(models)
+}
+
+function toggleModel(name: string, checked: boolean) {
+  const next = new Set(selectedModels.value)
+  if (checked) next.add(name)
+  else next.delete(name)
+  selectedModels.value = next
+}
+
+function toggleCategory(models: AvailableModel[], checked: boolean) {
+  const next = new Set(selectedModels.value)
+  for (const m of models) {
+    if (checked) next.add(m.name)
+    else next.delete(m.name)
+  }
+  selectedModels.value = next
+}
+
+async function loadModelCategories() {
+  modelsLoading.value = true
+  const { data } = await useApiFetch<ModelCategoriesResponse>('/api/benchmark/models')
+  modelsLoading.value = false
+  if (data?.categories) {
+    modelCategories.value = data.categories
+    const flat = Object.values(data.categories).flat().map(m => m.name)
+    allModels.value = flat
+    selectedModels.value = new Set(flat)
+  }
 }
 
 // ── Derived ──────────────────────────────────────────────────────────────────
@@ -355,7 +466,16 @@ function startBenchmark() {
   runError.value = ''
   runCancelled.value = false
 
-  const url = `/api/benchmark/run${includeSlow.value ? '?include_slow=true' : ''}`
+  const params = new URLSearchParams()
+  if (includeSlow.value) params.set('include_slow', 'true')
+  // Only send model_names when a subset is selected (not all, not none)
+  const total    = allModels.value.length
+  const selected = selectedModels.value.size
+  if (total > 0 && selected > 0 && selected < total) {
+    params.set('model_names', [...selectedModels.value].join(','))
+  }
+  const qs  = params.toString()
+  const url = `/api/benchmark/run${qs ? `?${qs}` : ''}`
   useApiSSE(
     url,
     async (event) => {
@@ -427,6 +547,7 @@ function startFinetune() {
 onMounted(() => {
   loadResults()
   loadFineTunedModels()
+  loadModelCategories()
 })
 </script>
 
@@ -760,6 +881,134 @@ onMounted(() => {
   padding: 0.05rem 0.35rem;
   font-size: 0.7rem;
   font-weight: 700;
+}
+
+/* ── Model Picker ───────────────────────────────────────── */
+.model-picker {
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.picker-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 0.9rem;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  background: var(--color-surface-raised, #e4ebf5);
+}
+.picker-summary::-webkit-details-marker { display: none; }
+.picker-summary::before { content: '▶  '; font-size: 0.65rem; color: var(--color-text-secondary, #6b7a99); }
+details[open] .picker-summary::before { content: '▼  '; }
+
+.picker-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text, #1a2338);
+}
+
+.picker-badge {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7a99);
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d0d7e8);
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+  font-family: var(--font-mono, monospace);
+  margin-left: auto;
+}
+
+.picker-body {
+  padding: 0.75rem;
+  border-top: 1px solid var(--color-border, #d0d7e8);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.picker-loading,
+.picker-empty {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary, #6b7a99);
+  padding: 0.5rem 0;
+}
+
+.picker-category {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.picker-cat-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-text, #1a2338);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.picker-cat-count {
+  font-weight: 400;
+  color: var(--color-text-secondary, #6b7a99);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.picker-no-models {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary, #6b7a99);
+  opacity: 0.65;
+  padding-left: 1.4rem;
+  font-style: italic;
+}
+
+.picker-model-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  padding-left: 1.4rem;
+}
+
+.picker-model-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--color-text, #1a2338);
+}
+
+.picker-model-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-adapter-type {
+  font-size: 0.68rem;
+  color: var(--color-text-secondary, #6b7a99);
+  background: var(--color-surface-raised, #e4ebf5);
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.3rem;
+  font-family: var(--font-mono, monospace);
+}
+
+@media (max-width: 600px) {
+  .picker-model-list { padding-left: 0; }
+  .picker-model-name { max-width: 14ch; }
 }
 
 /* ── Fine-tune section ──────────────────────────────────── */
