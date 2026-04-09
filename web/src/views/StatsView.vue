@@ -35,6 +35,39 @@
         </div>
       </div>
 
+      <!-- Benchmark Results -->
+      <template v-if="benchRows.length > 0">
+        <h2 class="section-title">🏁 Benchmark Results</h2>
+        <div class="bench-table-wrap">
+          <table class="bench-table">
+            <thead>
+              <tr>
+                <th class="bt-model-col">Model</th>
+                <th
+                  v-for="m in BENCH_METRICS"
+                  :key="m.key as string"
+                  class="bt-metric-col"
+                >{{ m.label }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in benchRows" :key="row.name">
+                <td class="bt-model-cell" :title="row.name">{{ row.name }}</td>
+                <td
+                  v-for="m in BENCH_METRICS"
+                  :key="m.key as string"
+                  class="bt-metric-cell"
+                  :class="{ 'bt-best': bestByMetric[m.key as string] === row.name }"
+                >
+                  {{ formatMetric(row.result[m.key]) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="bench-hint">Highlighted cells are the best-scoring model per metric.</p>
+      </template>
+
       <div class="file-info">
         <span class="file-path">Score file: <code>data/email_score.jsonl</code></span>
         <span class="file-size">{{ fileSizeLabel }}</span>
@@ -54,10 +87,18 @@
 import { ref, computed, onMounted } from 'vue'
 import { useApiFetch } from '../composables/useApi'
 
+interface BenchmarkModelResult {
+  accuracy?: number
+  macro_f1?: number
+  weighted_f1?: number
+  [key: string]: number | undefined
+}
+
 interface StatsResponse {
   total: number
   counts: Record<string, number>
   score_file_bytes: number
+  benchmark_results?: Record<string, BenchmarkModelResult>
 }
 
 // Canonical label order + metadata
@@ -107,6 +148,42 @@ const fileSizeLabel = computed(() => {
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
   return `${(b / 1024 / 1024).toFixed(2)} MB`
 })
+
+// Benchmark results helpers
+const BENCH_METRICS: Array<{ key: keyof BenchmarkModelResult; label: string }> = [
+  { key: 'accuracy',    label: 'Accuracy' },
+  { key: 'macro_f1',   label: 'Macro F1' },
+  { key: 'weighted_f1', label: 'Weighted F1' },
+]
+
+const benchRows = computed(() => {
+  const br = stats.value.benchmark_results
+  if (!br || Object.keys(br).length === 0) return []
+  return Object.entries(br).map(([name, result]) => ({ name, result }))
+})
+
+// Find the best model name for each metric
+const bestByMetric = computed((): Record<string, string> => {
+  const result: Record<string, string> = {}
+  for (const { key } of BENCH_METRICS) {
+    let bestName = ''
+    let bestVal  = -Infinity
+    for (const { name, result: r } of benchRows.value) {
+      const v = r[key]
+      if (v != null && v > bestVal) { bestVal = v; bestName = name }
+    }
+    result[key as string] = bestName
+  }
+  return result
+})
+
+function formatMetric(v: number | undefined): string {
+  if (v == null) return '—'
+  // Values in 0-1 range: format as percentage
+  if (v <= 1) return `${(v * 100).toFixed(1)}%`
+  // Already a percentage
+  return `${v.toFixed(1)}%`
+}
 
 async function load() {
   loading.value = true
@@ -232,6 +309,79 @@ onMounted(load)
   color: var(--color-text-secondary, #6b7a99);
   font-size: 0.9rem;
   padding: 1rem;
+}
+
+/* ── Benchmark Results ──────────────────────────── */
+.section-title {
+  font-family: var(--font-display, var(--font-body, sans-serif));
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--app-primary, #2A6080);
+  margin: 0;
+}
+
+.bench-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.5rem;
+}
+
+.bench-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.82rem;
+}
+
+.bt-model-col {
+  text-align: left;
+  padding: 0.45rem 0.75rem;
+  background: var(--color-surface-raised, #e4ebf5);
+  border-bottom: 1px solid var(--color-border, #d0d7e8);
+  font-weight: 600;
+  min-width: 12rem;
+}
+
+.bt-metric-col {
+  text-align: right;
+  padding: 0.45rem 0.75rem;
+  background: var(--color-surface-raised, #e4ebf5);
+  border-bottom: 1px solid var(--color-border, #d0d7e8);
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 6rem;
+}
+
+.bt-model-cell {
+  padding: 0.4rem 0.75rem;
+  border-top: 1px solid var(--color-border, #d0d7e8);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.76rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16rem;
+  color: var(--color-text, #1a2338);
+}
+
+.bt-metric-cell {
+  padding: 0.4rem 0.75rem;
+  border-top: 1px solid var(--color-border, #d0d7e8);
+  text-align: right;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text, #1a2338);
+}
+
+.bt-metric-cell.bt-best {
+  color: var(--color-success, #3a7a32);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-success, #3a7a32) 8%, transparent);
+}
+
+.bench-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7a99);
+  margin: 0;
 }
 
 @media (max-width: 480px) {
