@@ -54,12 +54,18 @@
           {{ lookupResult.description }}
         </p>
 
+        <div v-if="lookupResult.warning" class="compat-warning" role="alert">
+          <span class="compat-warning-icon">⚠️</span>
+          <span>{{ lookupResult.warning }}</span>
+        </div>
+
         <button
           class="btn-primary btn-add-queue"
+          :class="{ 'btn-add-queue-warn': !lookupResult.compatible }"
           :disabled="lookupResult.already_installed || lookupResult.already_queued || addingToQueue"
           @click="addToQueue"
         >
-          {{ addingToQueue ? 'Adding…' : 'Add to queue' }}
+          {{ addingToQueue ? 'Adding…' : lookupResult.compatible ? 'Add to queue' : 'Add anyway' }}
         </button>
       </div>
     </section>
@@ -188,6 +194,8 @@ interface LookupResult {
   repo_id: string
   pipeline_tag: string | null
   adapter_recommendation: string | null
+  compatible: boolean
+  warning: string | null
   size: number | null
   description: string | null
   already_installed: boolean
@@ -565,8 +573,32 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+.compat-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 40%, transparent);
+  font-size: 0.82rem;
+  color: var(--color-text, #1a2338);
+  line-height: 1.45;
+}
+
+.compat-warning-icon {
+  flex-shrink: 0;
+  line-height: 1.45;
+}
+
 .btn-add-queue {
   align-self: flex-start;
+}
+
+.btn-add-queue-warn {
+  background: var(--color-surface-raised, #e4ebf5);
+  color: var(--color-text-secondary, #6b7a99);
+  border: 1px solid var(--color-border, #d0d7e8);
 }
 
 /* ── Model cards (queue + downloads) ── */

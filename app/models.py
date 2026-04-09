@@ -200,8 +200,26 @@ def lookup_model(repo_id: str) -> dict:
     data = resp.json()
     pipeline_tag = data.get("pipeline_tag")
     adapter_recommendation = _TAG_TO_ADAPTER.get(pipeline_tag) if pipeline_tag else None
-    if pipeline_tag and adapter_recommendation is None:
-        logger.warning("Unknown pipeline_tag %r for %s — no adapter recommendation", pipeline_tag, repo_id)
+
+    # Determine compatibility and surface a human-readable warning
+    _supported = ", ".join(sorted(_TAG_TO_ADAPTER.keys()))
+    if adapter_recommendation is not None:
+        compatible = True
+        warning: str | None = None
+    elif pipeline_tag is None:
+        compatible = False
+        warning = (
+            "This model has no task tag on HuggingFace — adapter type is unknown. "
+            "It may not work with Avocet's email classification pipeline."
+        )
+        logger.warning("No pipeline_tag for %s — no adapter recommendation", repo_id)
+    else:
+        compatible = False
+        warning = (
+            f"\"{pipeline_tag}\" models are not supported by Avocet's email classification adapters. "
+            f"Supported task types: {_supported}."
+        )
+        logger.warning("Unsupported pipeline_tag %r for %s", pipeline_tag, repo_id)
 
     # Estimate model size from siblings list
     siblings = data.get("siblings") or []
@@ -216,6 +234,8 @@ def lookup_model(repo_id: str) -> dict:
         "repo_id": repo_id,
         "pipeline_tag": pipeline_tag,
         "adapter_recommendation": adapter_recommendation,
+        "compatible": compatible,
+        "warning": warning,
         "model_size_bytes": model_size_bytes,
         "description": description,
         "tags": data.get("tags") or [],

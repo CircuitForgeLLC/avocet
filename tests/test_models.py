@@ -371,15 +371,18 @@ def test_delete_installed_not_found_returns_404(client):
 
 
 def test_delete_installed_path_traversal_blocked(client):
-    """DELETE /installed/../../etc must be blocked (400 or 422)."""
+    """DELETE /installed/../../etc must be blocked.
+    Path traversal normalises to a different URL (/api/etc); if web/dist exists
+    the StaticFiles mount intercepts it and returns 405 (GET/HEAD only).
+    """
     r = client.delete("/api/models/installed/../../etc")
-    assert r.status_code in (400, 404, 422)
+    assert r.status_code in (400, 404, 405, 422)
 
 
 def test_delete_installed_dotdot_name_blocked(client):
     """A name containing '..' in any form must be rejected."""
     r = client.delete("/api/models/installed/..%2F..%2Fetc")
-    assert r.status_code in (400, 404, 422)
+    assert r.status_code in (400, 404, 405, 422)
 
 
 def test_delete_installed_name_with_slash_blocked(client):
