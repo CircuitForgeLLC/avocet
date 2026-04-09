@@ -271,3 +271,39 @@ def get_stats() -> dict[str, object]:
         "by_task_type": by_task_type,
         "export_ready": export_ready,
     }
+
+
+# ── GET /config ─────────────────────────────────────────────────────────────
+
+@router.get("/config")
+def get_sft_config() -> dict:
+    """Return the current SFT configuration (bench_results_dir)."""
+    f = _config_file()
+    if not f.exists():
+        return {"bench_results_dir": ""}
+    try:
+        raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return {"bench_results_dir": ""}
+    return raw.get("sft", {"bench_results_dir": ""})
+
+
+class SftConfigPayload(BaseModel):
+    bench_results_dir: str
+
+
+@router.post("/config")
+def post_sft_config(payload: SftConfigPayload) -> dict:
+    """Write the bench_results_dir setting to the config file."""
+    f = _config_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        raw = yaml.safe_load(f.read_text(encoding="utf-8")) if f.exists() else {}
+        raw = raw or {}
+    except yaml.YAMLError:
+        raw = {}
+    raw["sft"] = {"bench_results_dir": payload.bench_results_dir}
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(yaml.dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    tmp.rename(f)
+    return {"ok": True}

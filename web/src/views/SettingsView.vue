@@ -110,6 +110,63 @@
       </label>
     </section>
 
+    <!-- cf-orch SFT Integration section -->
+    <section class="section">
+      <h2 class="section-title">cf-orch Integration</h2>
+      <p class="section-desc">
+        Import SFT (supervised fine-tuning) candidates from cf-orch benchmark runs.
+      </p>
+
+      <div class="field-row">
+        <label class="field field-grow">
+          <span>bench_results_dir</span>
+          <input
+            id="bench-results-dir"
+            v-model="benchResultsDir"
+            type="text"
+            placeholder="/path/to/circuitforge-orch/scripts/bench_results"
+          />
+        </label>
+      </div>
+
+      <div class="account-actions">
+        <button class="btn-primary" @click="saveSftConfig">Save</button>
+        <button class="btn-secondary" @click="scanRuns">Scan for runs</button>
+        <span v-if="saveStatus" class="save-status">{{ saveStatus }}</span>
+      </div>
+
+      <table v-if="runs.length > 0" class="runs-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Candidates</th>
+            <th>Imported</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="run in runs" :key="run.run_id">
+            <td>{{ run.timestamp }}</td>
+            <td>{{ run.candidate_count }}</td>
+            <td>{{ run.already_imported ? '✓' : '—' }}</td>
+            <td>
+              <button
+                class="btn-import"
+                :disabled="run.already_imported || importingRunId === run.run_id"
+                @click="importRun(run.run_id)"
+              >
+                {{ importingRunId === run.run_id ? 'Importing…' : 'Import' }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div v-if="importResult" class="import-result">
+        Imported {{ importResult.imported }}, skipped {{ importResult.skipped }}.
+      </div>
+    </section>
+
     <!-- Save / Reload -->
     <div class="save-bar">
       <button class="btn-primary" :disabled="saving" @click="save">
@@ -141,6 +198,52 @@ const saveMsg       = ref('')
 const saveOk        = ref(true)
 const richMotion    = ref(localStorage.getItem('cf-avocet-rich-motion') !== 'false')
 const keyHints      = ref(localStorage.getItem('cf-avocet-key-hints') !== 'false')
+
+// SFT integration state
+const benchResultsDir = ref('')
+const runs            = ref<Array<{ run_id: string; timestamp: string; candidate_count: number; already_imported: boolean }>>([])
+const importingRunId  = ref<string | null>(null)
+const importResult    = ref<{ imported: number; skipped: number } | null>(null)
+const saveStatus      = ref('')
+
+async function saveSftConfig() {
+  saveStatus.value = 'Saving…'
+  try {
+    const res = await fetch('/api/sft/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bench_results_dir: benchResultsDir.value }),
+    })
+    saveStatus.value = res.ok ? 'Saved.' : 'Error saving.'
+  } catch {
+    saveStatus.value = 'Error saving.'
+  }
+  setTimeout(() => { saveStatus.value = '' }, 2000)
+}
+
+async function scanRuns() {
+  try {
+    const res = await fetch('/api/sft/runs')
+    if (res.ok) runs.value = await res.json()
+  } catch { /* ignore */ }
+}
+
+async function importRun(runId: string) {
+  importingRunId.value = runId
+  importResult.value = null
+  try {
+    const res = await fetch('/api/sft/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_id: runId }),
+    })
+    if (res.ok) {
+      importResult.value = await res.json()
+      scanRuns()  // refresh already_imported flags
+    }
+  } catch { /* ignore */ }
+  importingRunId.value = null
+}
 
 async function reload() {
   const { data } = await useApiFetch<{ accounts: Account[]; max_per_account: number }>('/api/config')
@@ -427,5 +530,62 @@ onMounted(reload)
   padding: 0.75rem;
   border: 1px dashed var(--color-border, #d0d7e8);
   border-radius: 0.5rem;
+}
+
+.section-desc {
+  color: var(--color-text-secondary, #6b7a99);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.field-input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.375rem;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #1a2338);
+  font-size: 0.9rem;
+  font-family: var(--font-body, sans-serif);
+  width: 100%;
+}
+
+.runs-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: var(--space-3, 0.75rem);
+  font-size: 0.88rem;
+}
+
+.runs-table th,
+.runs-table td {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  text-align: left;
+  border-bottom: 1px solid var(--color-border, #d0d7e8);
+}
+
+.btn-import {
+  padding: var(--space-1, 0.25rem) var(--space-3, 0.75rem);
+  border: 1px solid var(--app-primary, #2A6080);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: none;
+  color: var(--app-primary, #2A6080);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.btn-import:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.import-result {
+  margin-top: var(--space-2, 0.5rem);
+  font-size: 0.88rem;
+  color: var(--color-text-secondary, #6b7a99);
+}
+
+.save-status {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary, #6b7a99);
 }
 </style>

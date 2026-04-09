@@ -65,8 +65,9 @@ const navItems = [
   { path: '/',          icon: '🃏', label: 'Label'     },
   { path: '/fetch',     icon: '📥', label: 'Fetch'     },
   { path: '/stats',     icon: '📊', label: 'Stats'     },
-  { path: '/benchmark', icon: '🏁', label: 'Benchmark' },
-  { path: '/settings',  icon: '⚙️', label: 'Settings'  },
+  { path: '/benchmark',   icon: '🏁', label: 'Benchmark'   },
+  { path: '/corrections', icon: '✍️', label: 'Corrections' },
+  { path: '/settings',    icon: '⚙️', label: 'Settings'    },
 ]
 
 const stowed    = ref(localStorage.getItem(LS_KEY) === 'true')
