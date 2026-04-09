@@ -145,6 +145,9 @@ app = FastAPI(title="Avocet API")
 from app.sft import router as sft_router
 app.include_router(sft_router, prefix="/api/sft")
 
+from app.models import router as models_router
+app.include_router(models_router, prefix="/api/models")
+
 # In-memory last-action store (single user, local tool — in-memory is fine)
 _last_action: dict | None = None
 
