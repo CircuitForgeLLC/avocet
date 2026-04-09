@@ -3,26 +3,219 @@
     <header class="bench-header">
       <h1 class="page-title">🏁 Benchmark</h1>
       <div class="header-actions">
-        <label class="slow-toggle" :class="{ disabled: running }">
+        <label class="slow-toggle" :class="{ disabled: running }" v-if="benchMode === 'classifier'">
           <input type="checkbox" v-model="includeSlow" :disabled="running" />
           Include slow models
         </label>
+        <template v-if="benchMode === 'classifier'">
+          <button
+            class="btn-run"
+            :disabled="running"
+            @click="startBenchmark"
+          >
+            {{ running ? '⏳ Running…' : results ? '🔄 Re-run' : '▶ Run Benchmark' }}
+          </button>
+          <button
+            v-if="running"
+            class="btn-cancel"
+            @click="cancelBenchmark"
+          >
+            ✕ Cancel
+          </button>
+        </template>
+      </div>
+    </header>
+
+    <!-- Mode toggle -->
+    <div class="mode-toggle" role="group" aria-label="Benchmark mode">
+      <button
+        class="mode-btn"
+        :class="{ active: benchMode === 'classifier' }"
+        @click="benchMode = 'classifier'"
+      >Classifier</button>
+      <button
+        class="mode-btn"
+        :class="{ active: benchMode === 'llm' }"
+        @click="benchMode = 'llm'"
+      >🤖 LLM Eval</button>
+    </div>
+
+    <!-- ── LLM Eval panel ─────────────────────────────────────── -->
+    <template v-if="benchMode === 'llm'">
+
+      <!-- Task Selection -->
+      <details class="model-picker" open>
+        <summary class="picker-summary">
+          <span class="picker-title">📋 Task Selection</span>
+          <span class="picker-badge">{{ llmTaskBadge }}</span>
+        </summary>
+        <div class="picker-body">
+          <div v-if="llmTasksLoading" class="picker-loading">Loading tasks…</div>
+          <div v-else-if="Object.keys(llmTasksByType).length === 0" class="picker-empty">
+            No tasks found — check API connection.
+          </div>
+          <template v-else>
+            <div
+              v-for="(tasks, type) in llmTasksByType"
+              :key="type"
+              class="picker-category"
+            >
+              <label class="picker-cat-header">
+                <input
+                  type="checkbox"
+                  :checked="isTaskTypeAllSelected(tasks)"
+                  :indeterminate="isTaskTypeIndeterminate(tasks)"
+                  @change="toggleTaskType(tasks, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="picker-cat-name">{{ type }}</span>
+                <span class="picker-cat-count">({{ tasks.length }})</span>
+              </label>
+              <div class="picker-model-list">
+                <label
+                  v-for="t in tasks"
+                  :key="t.id"
+                  class="picker-model-row"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="selectedLlmTasks.has(t.id)"
+                    @change="toggleLlmTask(t.id, ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span class="picker-model-name" :title="t.name">{{ t.name }}</span>
+                </label>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- Model Selection -->
+      <details class="model-picker" open>
+        <summary class="picker-summary">
+          <span class="picker-title">🎯 Model Selection</span>
+          <span class="picker-badge">{{ llmModelBadge }}</span>
+        </summary>
+        <div class="picker-body">
+          <div v-if="llmModelsLoading" class="picker-loading">Loading models…</div>
+          <div v-else-if="Object.keys(llmModelsByService).length === 0" class="picker-empty">
+            No models found — check cf-orch connection.
+          </div>
+          <template v-else>
+            <div
+              v-for="(models, service) in llmModelsByService"
+              :key="service"
+              class="picker-category"
+            >
+              <label class="picker-cat-header">
+                <input
+                  type="checkbox"
+                  :checked="isServiceAllSelected(models)"
+                  :indeterminate="isServiceIndeterminate(models)"
+                  @change="toggleService(models, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="picker-cat-name">{{ service }}</span>
+                <span class="picker-cat-count">({{ models.length }})</span>
+              </label>
+              <div class="picker-model-list">
+                <label
+                  v-for="m in models"
+                  :key="m.id"
+                  class="picker-model-row"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="selectedLlmModels.has(m.id)"
+                    @change="toggleLlmModel(m.id, ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span class="picker-model-name" :title="m.name">{{ m.name }}</span>
+                  <span class="picker-adapter-type" v-if="m.tags.length">{{ m.tags.join(', ') }}</span>
+                </label>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- Run Controls -->
+      <div class="llm-run-controls">
         <button
           class="btn-run"
-          :disabled="running"
-          @click="startBenchmark"
+          :disabled="llmRunning || selectedLlmTasks.size === 0 || selectedLlmModels.size === 0"
+          @click="startLlmBenchmark"
         >
-          {{ running ? '⏳ Running…' : results ? '🔄 Re-run' : '▶ Run Benchmark' }}
+          {{ llmRunning ? '⏳ Running…' : '▶ Run LLM Eval' }}
         </button>
         <button
-          v-if="running"
+          v-if="llmRunning"
           class="btn-cancel"
-          @click="cancelBenchmark"
+          @click="cancelLlmBenchmark"
         >
           ✕ Cancel
         </button>
+        <span v-if="selectedLlmTasks.size === 0 || selectedLlmModels.size === 0" class="llm-run-hint">
+          Select at least one task and one model to run.
+        </span>
       </div>
-    </header>
+
+      <!-- Progress log -->
+      <div v-if="llmRunning || llmRunLog.length" class="run-log">
+        <div class="run-log-title">
+          <span>{{ llmRunning ? '⏳ Running LLM eval…' : llmError ? '❌ Failed' : '✅ Done' }}</span>
+          <button class="btn-ghost" @click="llmRunLog = []; llmError = ''">Clear</button>
+        </div>
+        <div class="log-lines" ref="llmLogEl">
+          <div
+            v-for="(line, i) in llmRunLog"
+            :key="i"
+            class="log-line"
+            :class="{ 'log-error': line.startsWith('ERROR') || line.startsWith('[error]') }"
+          >{{ line }}</div>
+        </div>
+        <p v-if="llmError" class="run-error">{{ llmError }}</p>
+      </div>
+
+      <!-- LLM Results table -->
+      <template v-if="llmResults.length > 0">
+        <h2 class="chart-title">LLM Eval Results</h2>
+        <div class="heatmap-scroll">
+          <table class="heatmap llm-results-table">
+            <thead>
+              <tr>
+                <th class="hm-label-col">Model</th>
+                <th class="hm-model-col">overall</th>
+                <th
+                  v-for="col in llmTaskTypeCols"
+                  :key="col"
+                  class="hm-model-col"
+                >{{ col }}</th>
+                <th class="hm-model-col">tok/s</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in llmResults" :key="row.model_id">
+                <td class="hm-label-cell llm-model-name-cell" :title="row.model_id">{{ row.model_name }}</td>
+                <td
+                  class="hm-value-cell"
+                  :class="{ 'bt-best': llmBestByCol['overall'] === row.model_id }"
+                >{{ pct(row.avg_quality_score) }}</td>
+                <td
+                  v-for="col in llmTaskTypeCols"
+                  :key="col"
+                  class="hm-value-cell"
+                  :class="{ 'bt-best': llmBestByCol[col] === row.model_id }"
+                >{{ row.quality_by_task_type[col] != null ? pct(row.quality_by_task_type[col]) : '—' }}</td>
+                <td class="hm-value-cell llm-tps-cell">{{ row.avg_tokens_per_sec.toFixed(1) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="heatmap-hint">Run LLM Eval on the Benchmark tab to refresh. Green = best per column.</p>
+      </template>
+
+    </template>
+
+    <!-- ── Classifier panel ──────────────────────────────────── -->
+    <template v-if="benchMode === 'classifier'">
 
     <!-- Model Picker -->
     <details class="model-picker" ref="pickerEl">
@@ -250,6 +443,10 @@
         </div>
       </div>
     </details>
+
+    </template>
+    <!-- ── /Classifier panel ─────────────────────────────────── -->
+
   </div>
 </template>
 
@@ -276,6 +473,33 @@ interface AvailableModel {
   name: string
   repo_id?: string
   adapter_type: string
+}
+
+// cf-orch types
+interface CfOrchTask {
+  id: string
+  name: string
+  type: string
+}
+
+interface CfOrchModel {
+  name: string
+  id: string
+  service: string
+  tags: string[]
+  vram_estimate_mb?: number
+}
+
+interface LlmModelResult {
+  model_name: string
+  model_id: string
+  node_id: string
+  avg_tokens_per_sec: number
+  avg_completion_ms: number
+  avg_quality_score: number
+  finetune_candidates: number
+  error_count: number
+  quality_by_task_type: Record<string, number>
 }
 
 interface ModelCategoriesResponse {
@@ -329,6 +553,25 @@ const ftError          = ref('')
 const ftLogEl          = ref<HTMLElement | null>(null)
 
 const runCancelled = ref(false)
+
+// ── Mode toggle ───────────────────────────────────────────────────────────────
+const benchMode = ref<'classifier' | 'llm'>('classifier')
+
+// ── LLM Eval state ───────────────────────────────────────────────────────────
+const llmTasks        = ref<CfOrchTask[]>([])
+const llmTasksLoading = ref(false)
+const llmModels       = ref<CfOrchModel[]>([])
+const llmModelsLoading = ref(false)
+
+const selectedLlmTasks  = ref<Set<string>>(new Set())
+const selectedLlmModels = ref<Set<string>>(new Set())
+
+const llmRunning      = ref(false)
+const llmRunLog       = ref<string[]>([])
+const llmError        = ref('')
+const llmResults      = ref<LlmModelResult[]>([])
+const llmEventSource  = ref<EventSource | null>(null)
+const llmLogEl        = ref<HTMLElement | null>(null)
 const ftCancelled  = ref(false)
 
 async function cancelBenchmark() {
@@ -337,6 +580,197 @@ async function cancelBenchmark() {
 
 async function cancelFinetune() {
   await fetch('/api/finetune/cancel', { method: 'POST' }).catch(() => {})
+}
+
+// ── LLM Eval computed ─────────────────────────────────────────────────────────
+const llmTasksByType = computed((): Record<string, CfOrchTask[]> => {
+  const groups: Record<string, CfOrchTask[]> = {}
+  for (const t of llmTasks.value) {
+    if (!groups[t.type]) groups[t.type] = []
+    groups[t.type].push(t)
+  }
+  return groups
+})
+
+const llmModelsByService = computed((): Record<string, CfOrchModel[]> => {
+  const groups: Record<string, CfOrchModel[]> = {}
+  for (const m of llmModels.value) {
+    if (!groups[m.service]) groups[m.service] = []
+    groups[m.service].push(m)
+  }
+  return groups
+})
+
+const llmTaskBadge = computed(() => {
+  const total = llmTasks.value.length
+  if (total === 0) return 'No tasks available'
+  const sel = selectedLlmTasks.value.size
+  if (sel === total) return `All tasks (${total})`
+  return `${sel} of ${total} tasks selected`
+})
+
+const llmModelBadge = computed(() => {
+  const total = llmModels.value.length
+  if (total === 0) return 'No models available'
+  const sel = selectedLlmModels.value.size
+  if (sel === total) return `All models (${total})`
+  return `${sel} of ${total} selected`
+})
+
+// All task type columns present in any result row
+const llmTaskTypeCols = computed(() => {
+  const types = new Set<string>()
+  for (const r of llmResults.value) {
+    for (const k of Object.keys(r.quality_by_task_type)) types.add(k)
+  }
+  return [...types].sort()
+})
+
+// Best model id per column (overall + each task type col)
+const llmBestByCol = computed((): Record<string, string> => {
+  const best: Record<string, string> = {}
+  if (llmResults.value.length === 0) return best
+
+  // overall
+  let bestId = '', bestVal = -Infinity
+  for (const r of llmResults.value) {
+    if (r.avg_quality_score > bestVal) { bestVal = r.avg_quality_score; bestId = r.model_id }
+  }
+  best['overall'] = bestId
+
+  for (const col of llmTaskTypeCols.value) {
+    bestId = ''; bestVal = -Infinity
+    for (const r of llmResults.value) {
+      const v = r.quality_by_task_type[col]
+      if (v != null && v > bestVal) { bestVal = v; bestId = r.model_id }
+    }
+    best[col] = bestId
+  }
+  return best
+})
+
+function pct(v: number): string {
+  return `${(v * 100).toFixed(1)}%`
+}
+
+// Task picker helpers
+function isTaskTypeAllSelected(tasks: CfOrchTask[]): boolean {
+  return tasks.length > 0 && tasks.every(t => selectedLlmTasks.value.has(t.id))
+}
+function isTaskTypeIndeterminate(tasks: CfOrchTask[]): boolean {
+  const some = tasks.some(t => selectedLlmTasks.value.has(t.id))
+  return some && !isTaskTypeAllSelected(tasks)
+}
+function toggleLlmTask(id: string, checked: boolean) {
+  const next = new Set(selectedLlmTasks.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  selectedLlmTasks.value = next
+}
+function toggleTaskType(tasks: CfOrchTask[], checked: boolean) {
+  const next = new Set(selectedLlmTasks.value)
+  for (const t of tasks) {
+    if (checked) next.add(t.id)
+    else next.delete(t.id)
+  }
+  selectedLlmTasks.value = next
+}
+
+// Model picker helpers
+function isServiceAllSelected(models: CfOrchModel[]): boolean {
+  return models.length > 0 && models.every(m => selectedLlmModels.value.has(m.id))
+}
+function isServiceIndeterminate(models: CfOrchModel[]): boolean {
+  const some = models.some(m => selectedLlmModels.value.has(m.id))
+  return some && !isServiceAllSelected(models)
+}
+function toggleLlmModel(id: string, checked: boolean) {
+  const next = new Set(selectedLlmModels.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  selectedLlmModels.value = next
+}
+function toggleService(models: CfOrchModel[], checked: boolean) {
+  const next = new Set(selectedLlmModels.value)
+  for (const m of models) {
+    if (checked) next.add(m.id)
+    else next.delete(m.id)
+  }
+  selectedLlmModels.value = next
+}
+
+// Data loaders
+async function loadLlmTasks() {
+  llmTasksLoading.value = true
+  const { data } = await useApiFetch<{ tasks: CfOrchTask[]; types: string[] }>('/api/cforch/tasks')
+  llmTasksLoading.value = false
+  if (data?.tasks) {
+    llmTasks.value = data.tasks
+    selectedLlmTasks.value = new Set(data.tasks.map(t => t.id))
+  }
+}
+
+async function loadLlmModels() {
+  llmModelsLoading.value = true
+  const { data } = await useApiFetch<{ models: CfOrchModel[] }>('/api/cforch/models')
+  llmModelsLoading.value = false
+  if (data?.models) {
+    llmModels.value = data.models
+    selectedLlmModels.value = new Set(data.models.map(m => m.id))
+  }
+}
+
+async function loadLlmResults() {
+  const { data } = await useApiFetch<LlmModelResult[]>('/api/cforch/results')
+  if (Array.isArray(data) && data.length > 0) {
+    llmResults.value = data
+  }
+}
+
+async function cancelLlmBenchmark() {
+  llmEventSource.value?.close()
+  llmEventSource.value = null
+  llmRunning.value = false
+  await fetch('/api/cforch/cancel', { method: 'POST' }).catch(() => {})
+}
+
+function startLlmBenchmark() {
+  llmRunning.value = true
+  llmRunLog.value  = []
+  llmError.value   = ''
+
+  const params = new URLSearchParams()
+  const taskIds = [...selectedLlmTasks.value].join(',')
+  if (taskIds) params.set('task_ids', taskIds)
+
+  const es = new EventSource(`/api/cforch/run?${params}`)
+  llmEventSource.value = es
+
+  es.onmessage = async (e: MessageEvent) => {
+    const msg = JSON.parse(e.data)
+    if (msg.type === 'progress' && typeof msg.message === 'string') {
+      llmRunLog.value.push(msg.message)
+      await nextTick()
+      llmLogEl.value?.scrollTo({ top: llmLogEl.value.scrollHeight, behavior: 'smooth' })
+    } else if (msg.type === 'result' && Array.isArray(msg.summary)) {
+      llmResults.value = msg.summary
+    } else if (msg.type === 'complete') {
+      llmRunning.value = false
+      es.close()
+      llmEventSource.value = null
+    } else if (msg.type === 'error' && typeof msg.message === 'string') {
+      llmError.value = msg.message
+      llmRunning.value = false
+      es.close()
+      llmEventSource.value = null
+    }
+  }
+  es.onerror = () => {
+    if (llmRunning.value) llmError.value = 'Connection lost'
+    llmRunning.value = false
+    es.close()
+    llmEventSource.value = null
+  }
 }
 
 // ── Model picker computed ─────────────────────────────────────────────────────
@@ -548,6 +982,9 @@ onMounted(() => {
   loadResults()
   loadFineTunedModels()
   loadModelCategories()
+  loadLlmTasks()
+  loadLlmModels()
+  loadLlmResults()
 })
 </script>
 
@@ -1091,5 +1528,79 @@ details[open] .ft-summary::before { content: '▼  '; }
 @media (max-width: 600px) {
   .ft-controls { flex-direction: column; align-items: stretch; }
   .ft-select { min-width: 0; width: 100%; }
+}
+
+/* ── Mode toggle (segmented control / pill) ─────── */
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  align-self: flex-start;
+}
+
+.mode-btn {
+  padding: 0.4rem 1.1rem;
+  font-size: 0.85rem;
+  font-family: var(--font-body, sans-serif);
+  font-weight: 500;
+  border: none;
+  background: var(--color-surface, #fff);
+  color: var(--color-text-secondary, #6b7a99);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mode-btn:not(:last-child) {
+  border-right: 1px solid var(--color-border, #d0d7e8);
+}
+
+.mode-btn.active {
+  background: var(--app-primary, #2A6080);
+  color: #fff;
+}
+
+.mode-btn:not(.active):hover {
+  background: var(--color-surface-raised, #e4ebf5);
+}
+
+/* ── LLM run controls ───────────────────────────── */
+.llm-run-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.llm-run-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary, #6b7a99);
+}
+
+/* ── LLM results table tweaks ───────────────────── */
+.llm-results-table .bt-best {
+  color: var(--color-success, #3a7a32);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-success, #3a7a32) 8%, transparent);
+}
+
+.llm-model-name-cell {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--color-surface, #fff);
+  border-top: 1px solid var(--color-border, #d0d7e8);
+  padding: 0.35rem 0.6rem;
+  position: sticky;
+  left: 0;
+}
+
+.llm-tps-cell {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 </style>
