@@ -206,6 +206,18 @@ const importingRunId  = ref<string | null>(null)
 const importResult    = ref<{ imported: number; skipped: number } | null>(null)
 const saveStatus      = ref('')
 
+async function loadSftConfig() {
+  try {
+    const res = await fetch('/api/sft/config')
+    if (res.ok) {
+      const data = await res.json()
+      benchResultsDir.value = data.bench_results_dir ?? ''
+    }
+  } catch {
+    // non-fatal — leave field empty
+  }
+}
+
 async function saveSftConfig() {
   saveStatus.value = 'Saving…'
   try {
@@ -322,7 +334,10 @@ function onKeyHintsChange() {
   document.documentElement.classList.toggle('hide-key-hints', !keyHints.value)
 }
 
-onMounted(reload)
+onMounted(() => {
+  reload()
+  loadSftConfig()
+})
 </script>
 
 <style scoped>

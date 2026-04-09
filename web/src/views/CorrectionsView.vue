@@ -116,61 +116,84 @@ function startCorrection() {
 async function handleCorrect(text: string) {
   if (!store.current) return
   const item = store.current
-  store.setLastAction('correct', item)
-  store.removeCurrentFromQueue()
-  correcting.value     = false
-  store.totalRemaining = Math.max(0, store.totalRemaining - 1)
-  await fetch('/api/sft/submit', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ id: item.id, action: 'correct', corrected_response: text }),
-  })
-  fetchStats()
-  if (store.queue.length < 5) fetchBatch()
+  correcting.value = false
+  try {
+    const res = await fetch('/api/sft/submit', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id: item.id, action: 'correct', corrected_response: text }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    store.removeCurrentFromQueue()
+    store.setLastAction('correct', item)
+    store.totalRemaining = Math.max(0, store.totalRemaining - 1)
+    fetchStats()
+    if (store.queue.length < 5) fetchBatch()
+  } catch (err) {
+    console.error('handleCorrect failed:', err)
+  }
 }
 
 async function handleDiscard() {
   if (!store.current) return
   const item = store.current
-  store.setLastAction('discard', item)
-  store.removeCurrentFromQueue()
-  store.totalRemaining = Math.max(0, store.totalRemaining - 1)
-  await fetch('/api/sft/submit', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ id: item.id, action: 'discard' }),
-  })
-  fetchStats()
-  if (store.queue.length < 5) fetchBatch()
+  try {
+    const res = await fetch('/api/sft/submit', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id: item.id, action: 'discard' }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    store.removeCurrentFromQueue()
+    store.setLastAction('discard', item)
+    store.totalRemaining = Math.max(0, store.totalRemaining - 1)
+    fetchStats()
+    if (store.queue.length < 5) fetchBatch()
+  } catch (err) {
+    console.error('handleDiscard failed:', err)
+  }
 }
 
 async function handleFlag() {
   if (!store.current) return
   const item = store.current
-  store.setLastAction('flag', item)
-  store.removeCurrentFromQueue()
-  store.totalRemaining = Math.max(0, store.totalRemaining - 1)
-  await fetch('/api/sft/submit', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ id: item.id, action: 'flag' }),
-  })
-  fetchStats()
-  if (store.queue.length < 5) fetchBatch()
+  try {
+    const res = await fetch('/api/sft/submit', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id: item.id, action: 'flag' }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    store.removeCurrentFromQueue()
+    store.setLastAction('flag', item)
+    store.totalRemaining = Math.max(0, store.totalRemaining - 1)
+    fetchStats()
+    if (store.queue.length < 5) fetchBatch()
+  } catch (err) {
+    console.error('handleFlag failed:', err)
+  }
 }
 
 async function handleUndo() {
   if (!store.lastAction) return
-  const { item } = store.lastAction
-  store.restoreItem(item)
-  store.totalRemaining++
-  store.clearLastAction()
-  await fetch('/api/sft/undo', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ id: item.id }),
-  })
-  fetchStats()
+  const action = store.lastAction
+  const { item } = action
+  try {
+    const res = await fetch('/api/sft/undo', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id: item.id }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    store.restoreItem(item)
+    store.totalRemaining++
+    store.clearLastAction()
+    fetchStats()
+  } catch (err) {
+    // Backend did not restore — clear the undo UI without restoring queue state
+    console.error('handleUndo failed:', err)
+    store.clearLastAction()
+  }
 }
 
 onMounted(() => {

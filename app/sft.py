@@ -285,7 +285,8 @@ def get_sft_config() -> dict:
         raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return {"bench_results_dir": ""}
-    return raw.get("sft", {"bench_results_dir": ""})
+    sft_section = raw.get("sft") or {}
+    return {"bench_results_dir": sft_section.get("bench_results_dir", "")}
 
 
 class SftConfigPayload(BaseModel):
