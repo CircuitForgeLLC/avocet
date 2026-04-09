@@ -232,6 +232,41 @@ def test_submit_already_approved_returns_409(client, tmp_path):
     assert r.status_code == 409
 
 
+def test_submit_correct_stores_failure_category(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    r = client.post("/api/sft/submit", json={
+        "id": "a", "action": "correct",
+        "corrected_response": "def add(a, b): return a + b",
+        "failure_category": "style_violation",
+    })
+    assert r.status_code == 200
+    from app import sft as sft_module
+    records = sft_module._read_candidates()
+    assert records[0]["failure_category"] == "style_violation"
+
+
+def test_submit_correct_null_failure_category(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    r = client.post("/api/sft/submit", json={
+        "id": "a", "action": "correct",
+        "corrected_response": "def add(a, b): return a + b",
+    })
+    assert r.status_code == 200
+    from app import sft as sft_module
+    records = sft_module._read_candidates()
+    assert records[0]["failure_category"] is None
+
+
+def test_submit_invalid_failure_category_returns_422(client, tmp_path):
+    _populate_candidates(tmp_path, [_make_record("a")])
+    r = client.post("/api/sft/submit", json={
+        "id": "a", "action": "correct",
+        "corrected_response": "def add(a, b): return a + b",
+        "failure_category": "nonsense",
+    })
+    assert r.status_code == 422
+
+
 # ── /api/sft/undo ────────────────────────────────────────────────────────────
 
 def test_undo_restores_discarded_to_needs_review(client, tmp_path):
