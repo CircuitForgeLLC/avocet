@@ -8,13 +8,16 @@ from pathlib import Path
 @pytest.fixture(autouse=True)
 def reset_sft_globals(tmp_path):
     from app import sft as sft_module
-    _prev_data = sft_module._SFT_DATA_DIR
-    _prev_cfg = sft_module._SFT_CONFIG_DIR
+    _prev_data    = sft_module._SFT_DATA_DIR
+    _prev_cfg     = sft_module._SFT_CONFIG_DIR
+    _prev_default = sft_module._DEFAULT_BENCH_RESULTS_DIR
     sft_module.set_sft_data_dir(tmp_path)
     sft_module.set_sft_config_dir(tmp_path)
+    sft_module.set_default_bench_results_dir(str(tmp_path / "bench_results"))
     yield
     sft_module.set_sft_data_dir(_prev_data)
     sft_module.set_sft_config_dir(_prev_cfg)
+    sft_module.set_default_bench_results_dir(_prev_default)
 
 
 @pytest.fixture

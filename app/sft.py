@@ -51,17 +51,26 @@ def _config_file() -> Path:
     return _ROOT / "config" / "label_tool.yaml"
 
 
+_DEFAULT_BENCH_RESULTS_DIR = "/Library/Development/CircuitForge/circuitforge-orch/scripts/bench_results"
+
+
+def set_default_bench_results_dir(path: str) -> None:
+    """Override the default bench_results_dir — used by tests to avoid real filesystem."""
+    global _DEFAULT_BENCH_RESULTS_DIR
+    _DEFAULT_BENCH_RESULTS_DIR = path
+
+
 def _get_bench_results_dir() -> Path:
     f = _config_file()
-    if not f.exists():
-        return Path("/nonexistent-bench-results")
-    try:
-        raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:
-        logger.warning("Failed to parse SFT config %s: %s", f, exc)
-        return Path("/nonexistent-bench-results")
-    d = raw.get("sft", {}).get("bench_results_dir", "")
-    return Path(d) if d else Path("/nonexistent-bench-results")
+    if f.exists():
+        try:
+            raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            d = raw.get("sft", {}).get("bench_results_dir", "")
+            if d:
+                return Path(d)
+        except yaml.YAMLError as exc:
+            logger.warning("Failed to parse SFT config %s: %s", f, exc)
+    return Path(_DEFAULT_BENCH_RESULTS_DIR)
 
 
 def _candidates_file() -> Path:
