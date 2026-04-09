@@ -2,14 +2,16 @@
 import pytest
 
 
-def test_labels_constant_has_nine_items():
+def test_labels_constant_has_ten_items():
     from scripts.classifier_adapters import LABELS
-    assert len(LABELS) == 9
+    assert len(LABELS) == 10
     assert "interview_scheduled" in LABELS
     assert "neutral" in LABELS
     assert "event_rescheduled" in LABELS
-    assert "unrelated" in LABELS
     assert "digest" in LABELS
+    assert "new_lead" in LABELS
+    assert "hired" in LABELS
+    assert "unrelated" not in LABELS
 
 
 def test_compute_metrics_perfect_predictions():
@@ -178,3 +180,91 @@ def test_reranker_adapter_picks_highest_score():
 def test_reranker_adapter_descriptions_cover_all_labels():
     from scripts.classifier_adapters import LABEL_DESCRIPTIONS, LABELS
     assert set(LABEL_DESCRIPTIONS.keys()) == set(LABELS)
+
+
+# ---- FineTunedAdapter tests ----
+
+def test_finetuned_adapter_classify_calls_pipeline_with_sep_format(tmp_path):
+    """classify() must format input as 'subject [SEP] body[:400]' — not the zero-shot format."""
+    from unittest.mock import MagicMock, patch
+    from scripts.classifier_adapters import FineTunedAdapter
+
+    mock_result = [{"label": "digest", "score": 0.95}]
+    mock_pipe_instance = MagicMock(return_value=mock_result)
+    mock_pipe_factory = MagicMock(return_value=mock_pipe_instance)
+
+    adapter = FineTunedAdapter("avocet-deberta-small", str(tmp_path))
+    with patch("scripts.classifier_adapters.pipeline", mock_pipe_factory):
+        result = adapter.classify("Test subject", "Test body")
+
+    assert result == "digest"
+    call_args = mock_pipe_instance.call_args[0][0]
+    assert "[SEP]" in call_args
+    assert "Test subject" in call_args
+    assert "Test body" in call_args
+
+
+def test_finetuned_adapter_truncates_body_to_400():
+    """Body must be truncated to 400 chars in the [SEP] format."""
+    from unittest.mock import MagicMock, patch
+    from scripts.classifier_adapters import FineTunedAdapter, LABELS
+
+    long_body = "x" * 800
+    mock_result = [{"label": "neutral", "score": 0.9}]
+    mock_pipe_instance = MagicMock(return_value=mock_result)
+    mock_pipe_factory = MagicMock(return_value=mock_pipe_instance)
+
+    adapter = FineTunedAdapter("avocet-deberta-small", "/fake/path")
+    with patch("scripts.classifier_adapters.pipeline", mock_pipe_factory):
+        adapter.classify("Subject", long_body)
+
+    call_text = mock_pipe_instance.call_args[0][0]
+    parts = call_text.split(" [SEP] ", 1)
+    assert len(parts) == 2, "Input must contain ' [SEP] ' separator"
+    assert len(parts[1]) == 400, f"Body must be exactly 400 chars, got {len(parts[1])}"
+
+
+def test_finetuned_adapter_returns_label_string():
+    """classify() must return a plain string, not a dict."""
+    from unittest.mock import MagicMock, patch
+    from scripts.classifier_adapters import FineTunedAdapter
+
+    mock_result = [{"label": "interview_scheduled", "score": 0.87}]
+    mock_pipe_instance = MagicMock(return_value=mock_result)
+    mock_pipe_factory = MagicMock(return_value=mock_pipe_instance)
+
+    adapter = FineTunedAdapter("avocet-deberta-small", "/fake/path")
+    with patch("scripts.classifier_adapters.pipeline", mock_pipe_factory):
+        result = adapter.classify("S", "B")
+
+    assert isinstance(result, str)
+    assert result == "interview_scheduled"
+
+
+def test_finetuned_adapter_lazy_loads_pipeline():
+    """Pipeline factory must not be called until classify() is first called."""
+    from unittest.mock import MagicMock, patch
+    from scripts.classifier_adapters import FineTunedAdapter
+
+    mock_pipe_factory = MagicMock(return_value=MagicMock(return_value=[{"label": "neutral", "score": 0.9}]))
+
+    with patch("scripts.classifier_adapters.pipeline", mock_pipe_factory):
+        adapter = FineTunedAdapter("avocet-deberta-small", "/fake/path")
+        assert not mock_pipe_factory.called
+        adapter.classify("s", "b")
+        assert mock_pipe_factory.called
+
+
+def test_finetuned_adapter_unload_clears_pipeline():
+    """unload() must set _pipeline to None so memory is released."""
+    from unittest.mock import MagicMock, patch
+    from scripts.classifier_adapters import FineTunedAdapter
+
+    mock_pipe_factory = MagicMock(return_value=MagicMock(return_value=[{"label": "neutral", "score": 0.9}]))
+
+    with patch("scripts.classifier_adapters.pipeline", mock_pipe_factory):
+        adapter = FineTunedAdapter("avocet-deberta-small", "/fake/path")
+        adapter.classify("s", "b")
+        assert adapter._pipeline is not None
+        adapter.unload()
+        assert adapter._pipeline is None

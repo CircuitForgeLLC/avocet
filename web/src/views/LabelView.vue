@@ -1,0 +1,506 @@
+<template>
+  <div class="label-view">
+    <!-- Header bar -->
+    <header class="lv-header" :class="{ 'is-held': isHeld }">
+      <span class="queue-count">
+        <span v-if="loading" class="queue-status">Loading…</span>
+        <template v-else-if="store.totalRemaining > 0">
+          {{ store.totalRemaining }} remaining
+        </template>
+        <span v-else class="queue-status">Queue empty</span>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="onRoll"         class="badge badge-roll">🔥 On a roll!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="speedRound"     class="badge badge-speed">⚡ Speed round!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="fiftyDeep"      class="badge badge-fifty">🎯 Fifty deep!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="centuryMark"    class="badge badge-century">💯 Century!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="cleanSweep"     class="badge badge-sweep">🧹 Clean sweep!</span>
+        </Transition>
+        <Transition @enter="onBadgeEnter" :css="false">
+          <span v-if="midnightLabeler" class="badge badge-midnight">🦉 Midnight labeler!</span>
+        </Transition>
+      </span>
+      <div class="header-actions">
+        <button @click="handleUndo"    :disabled="!store.lastAction" class="btn-action">↩ Undo</button>
+        <button @click="handleSkip"    :disabled="!store.current"    class="btn-action">→ Skip</button>
+        <button @click="handleDiscard" :disabled="!store.current"    class="btn-action btn-danger">✕ Discard</button>
+      </div>
+    </header>
+
+    <!-- States -->
+    <div v-if="loading" class="skeleton-card" aria-label="Loading email" />
+
+    <div v-else-if="apiError" class="error-display" role="alert">
+      <p>Couldn't reach Avocet API.</p>
+      <button @click="fetchBatch" class="btn-action">Retry</button>
+    </div>
+
+    <div v-else-if="!store.current" class="empty-state">
+      <p>Queue is empty — fetch more emails to continue.</p>
+    </div>
+
+    <!-- Card stack + label grid -->
+    <template v-else>
+      <!-- Toss edge zones — thin trip-wires at screen edges, visible only while card is held -->
+      <Transition name="zone-fade">
+        <div
+          v-if="isHeld && motion.rich.value"
+          class="toss-zone toss-zone-left"
+          :class="{ active: hoveredZone === 'discard' }"
+          aria-hidden="true"
+        >✕</div>
+      </Transition>
+      <Transition name="zone-fade">
+        <div
+          v-if="isHeld && motion.rich.value"
+          class="toss-zone toss-zone-right"
+          :class="{ active: hoveredZone === 'skip' }"
+          aria-hidden="true"
+        >→</div>
+      </Transition>
+
+      <div class="card-stack-wrapper" :class="{ 'is-held': isHeld }">
+        <EmailCardStack
+          :item="store.current"
+          :is-bucket-mode="isHeld"
+          :dismiss-type="dismissType"
+          @label="handleLabel"
+          @skip="handleSkip"
+          @discard="handleDiscard"
+          @drag-start="isHeld = true"
+          @drag-end="isHeld = false"
+          @zone-hover="hoveredZone = $event"
+          @bucket-hover="hoveredBucket = $event"
+        />
+      </div>
+
+      <div ref="gridEl" class="bucket-grid-footer" :class="{ 'grid-active': isHeld }">
+        <LabelBucketGrid
+          :labels="labels"
+          :is-bucket-mode="isHeld"
+          :hovered-bucket="hoveredBucket"
+          @label="handleLabel"
+        />
+      </div>
+    </template>
+
+    <!-- Undo toast -->
+    <UndoToast
+      v-if="store.lastAction"
+      :action="store.lastAction"
+      @undo="handleUndo"
+      @expire="store.clearLastAction()"
+    />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { animate } from 'animejs'
+import { useLabelStore } from '../stores/label'
+import { useApiFetch } from '../composables/useApi'
+import { useHaptics } from '../composables/useHaptics'
+import { useMotion } from '../composables/useMotion'
+import { useLabelKeyboard } from '../composables/useLabelKeyboard'
+import { fireConfetti, useCursorTrail } from '../composables/useEasterEgg'
+import EmailCardStack from '../components/EmailCardStack.vue'
+import LabelBucketGrid from '../components/LabelBucketGrid.vue'
+import UndoToast from '../components/UndoToast.vue'
+
+const store   = useLabelStore()
+const haptics = useHaptics()
+const motion  = useMotion()   // only needed to pass to child — actual value used in App.vue
+
+const gridEl     = ref<HTMLElement | null>(null)
+
+const loading    = ref(true)
+const apiError   = ref(false)
+const isHeld     = ref(false)
+const hoveredZone   = ref<'discard' | 'skip' | null>(null)
+const hoveredBucket = ref<string | null>(null)
+const labels     = ref<any[]>([])
+const dismissType = ref<'label' | 'skip' | 'discard' | null>(null)
+
+watch(isHeld, (held) => {
+  if (!motion.rich.value || !gridEl.value) return
+  animate(gridEl.value,
+    held
+      ? { y: -8, opacity: 0.45, ease: 'out(4)', duration: 380 }
+      : { y:  0, opacity: 1,    ease: 'out(4)', duration: 320 }
+  )
+})
+
+function onBadgeEnter(el: Element, done: () => void) {
+  if (!motion.rich.value) { done(); return }
+  animate(el as HTMLElement,
+    { scale: [0.6, 1], opacity: [0, 1], ease: spring({ mass: 1.5, stiffness: 80, damping: 8 }), duration: 300, onComplete: done }
+  )
+}
+
+// Easter egg state
+const consecutiveLabeled = ref(0)
+const recentLabels = ref<number[]>([])
+const onRoll    = ref(false)
+const speedRound = ref(false)
+const fiftyDeep  = ref(false)
+
+// New easter egg state
+const centuryMark    = ref(false)
+const cleanSweep     = ref(false)
+const midnightLabeler = ref(false)
+let midnightShownThisSession = false
+let trailCleanup: (() => void) | null = null
+let themeObserver: MutationObserver | null = null
+
+function syncCursorTrail() {
+  const isHacker = document.documentElement.dataset.theme === 'hacker'
+  if (isHacker && !trailCleanup) {
+    trailCleanup = useCursorTrail()
+  } else if (!isHacker && trailCleanup) {
+    trailCleanup()
+    trailCleanup = null
+  }
+}
+
+async function fetchBatch() {
+  loading.value = true
+  apiError.value = false
+  const { data, error } = await useApiFetch<{ items: any[]; total: number }>('/api/queue?limit=10')
+  loading.value = false
+  if (error || !data) {
+    apiError.value = true
+    return
+  }
+  store.queue = data.items
+  store.totalRemaining = data.total
+
+  // Clean sweep — queue exhausted in this batch
+  if (data.total === 0 && data.items.length === 0 && store.sessionLabeled > 0) {
+    cleanSweep.value = true
+    setTimeout(() => { cleanSweep.value = false }, 4000)
+  }
+}
+
+function checkSpeedRound(): boolean {
+  const now = Date.now()
+  recentLabels.value = recentLabels.value.filter(t => now - t < 20000)
+  recentLabels.value.push(now)
+  return recentLabels.value.length >= 5
+}
+
+async function handleLabel(name: string) {
+  const item = store.current
+  if (!item) return
+
+  // Optimistic update
+  store.setLastAction('label', item, name)
+  dismissType.value = 'label'
+
+  if (motion.rich.value) {
+    await new Promise(r => setTimeout(r, 350))
+  }
+
+  store.removeCurrentFromQueue()
+  store.incrementLabeled()
+  dismissType.value = null
+  consecutiveLabeled.value++
+  haptics.label()
+
+  // Easter eggs
+  if (consecutiveLabeled.value >= 10) {
+    onRoll.value = true
+    setTimeout(() => { onRoll.value = false }, 3000)
+  }
+  if (store.sessionLabeled === 50) {
+    fiftyDeep.value = true
+    setTimeout(() => { fiftyDeep.value = false }, 5000)
+  }
+  if (checkSpeedRound()) {
+    onRoll.value = false
+    speedRound.value = true
+    setTimeout(() => { speedRound.value = false }, 2500)
+  }
+
+  // Hired confetti
+  if (name === 'hired') {
+    fireConfetti()
+  }
+
+  // Century mark
+  if (store.sessionLabeled === 100) {
+    centuryMark.value = true
+    setTimeout(() => { centuryMark.value = false }, 4000)
+  }
+
+  // Midnight labeler — once per session
+  if (!midnightShownThisSession) {
+    const h = new Date().getHours()
+    if (h >= 0 && h < 3) {
+      midnightShownThisSession = true
+      midnightLabeler.value = true
+      setTimeout(() => { midnightLabeler.value = false }, 5000)
+    }
+  }
+
+  await useApiFetch('/api/label', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: item.id, label: name }),
+  })
+
+  if (store.queue.length < 3) await fetchBatch()
+}
+
+async function handleSkip() {
+  const item = store.current
+  if (!item) return
+  store.setLastAction('skip', item)
+  dismissType.value = 'skip'
+  if (motion.rich.value) await new Promise(r => setTimeout(r, 300))
+  store.removeCurrentFromQueue()
+  dismissType.value = null
+  consecutiveLabeled.value = 0
+  haptics.skip()
+  await useApiFetch('/api/skip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: item.id }),
+  })
+  if (store.queue.length < 3) await fetchBatch()
+}
+
+async function handleDiscard() {
+  const item = store.current
+  if (!item) return
+  store.setLastAction('discard', item)
+  dismissType.value = 'discard'
+  if (motion.rich.value) await new Promise(r => setTimeout(r, 400))
+  store.removeCurrentFromQueue()
+  dismissType.value = null
+  consecutiveLabeled.value = 0
+  haptics.discard()
+  await useApiFetch('/api/discard', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: item.id }),
+  })
+  if (store.queue.length < 3) await fetchBatch()
+}
+
+async function handleUndo() {
+  const { data } = await useApiFetch<{ undone: { type: string; item: any } }>('/api/label/undo', { method: 'DELETE' })
+  if (data?.undone?.item) {
+    store.restoreItem(data.undone.item)
+    store.clearLastAction()
+    haptics.undo()
+    if (data.undone.type === 'label') {
+      // decrement session counter — sessionLabeled is direct state in a setup store
+      if (store.sessionLabeled > 0) store.sessionLabeled--
+    }
+  }
+}
+
+useLabelKeyboard({
+  labels: () => labels.value,   // getter — evaluated on each keypress
+  onLabel: handleLabel,
+  onSkip: handleSkip,
+  onDiscard: handleDiscard,
+  onUndo: handleUndo,
+  onHelp: () => { /* TODO: help overlay */ },
+})
+
+onMounted(async () => {
+  const { data } = await useApiFetch<any[]>('/api/config/labels')
+  if (data) labels.value = data
+  await fetchBatch()
+
+  // Cursor trail — activate immediately if already in hacker mode, then watch for changes
+  syncCursorTrail()
+  themeObserver = new MutationObserver(syncCursorTrail)
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+})
+
+onUnmounted(() => {
+  themeObserver?.disconnect()
+  themeObserver = null
+  if (trailCleanup) {
+    trailCleanup()
+    trailCleanup = null
+  }
+})
+</script>
+
+<style scoped>
+.label-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem;
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  overflow-x: hidden; /* prevent card animations from causing horizontal scroll */
+}
+
+.queue-status {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.lv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  transition: opacity 200ms ease;
+}
+.lv-header.is-held {
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.queue-count {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9rem;
+  color: var(--color-text-secondary, #6b7a99);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: var(--font-body, sans-serif);
+}
+
+.badge-roll    { background: #ff6b35; color: #fff; }
+.badge-speed   { background: #7c3aed; color: #fff; }
+.badge-fifty   { background: var(--app-accent, #B8622A); color: var(--app-accent-text, #1a2338); }
+.badge-century { background: #ffd700; color: #1a2338; }
+.badge-sweep   { background: var(--app-primary, #2A6080); color: #fff; }
+.badge-midnight { background: #1a1a2e; color: #7c9dcf; border: 1px solid #7c9dcf; }
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-action {
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #1a2338);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-action:hover:not(:disabled) {
+  background: var(--app-primary-light, #E4F0F7);
+}
+.btn-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-danger {
+  border-color: var(--color-error, #ef4444);
+  color: var(--color-error, #ef4444);
+}
+
+.skeleton-card {
+  min-height: 200px;
+  border-radius: var(--radius-card, 1rem);
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-raised, #f0f4fc) 25%,
+    var(--color-surface, #e4ebf5) 50%,
+    var(--color-surface-raised, #f0f4fc) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.error-display, .empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 3rem 1rem;
+  color: var(--color-text-secondary, #6b7a99);
+  text-align: center;
+}
+
+.card-stack-wrapper {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 0.5rem;
+}
+/* When held: escape overflow clip so ball floats freely above the footer. */
+.card-stack-wrapper.is-held {
+  overflow: visible;
+  position: relative;
+  z-index: 20;
+}
+
+/* Bucket grid stays pinned to the bottom of the viewport while the email card
+   can be scrolled freely. "hired" (10th button) may clip on very small screens
+   — that is intentional per design. */
+.bucket-grid-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--color-bg, var(--color-surface, #f0f4fc));
+  padding: 0.5rem 0 0.75rem;
+  z-index: 10;
+}
+/* During toss: stay sticky so the grid holds its natural column position
+   (fixed caused a horizontal jump on desktop due to sidebar offset).
+   Opacity and translateY(-8px) are owned by Anime.js. */
+.bucket-grid-footer.grid-active {
+  opacity: 0.45;
+}
+
+/* ── Toss edge zones ── */
+.toss-zone {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 7%;
+  z-index: 50;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  opacity: 0.25;
+  transition: opacity 200ms ease, background 200ms ease;
+}
+.toss-zone-left  { left: 0;  background: rgba(244, 67,  54, 0.12); color: #ef4444; }
+.toss-zone-right { right: 0; background: rgba(255, 152,  0, 0.12); color: #f97316; }
+.toss-zone.active {
+  opacity: 0.85;
+  background: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+/* Zone transition */
+.zone-fade-enter-active,
+.zone-fade-leave-active { transition: opacity 180ms ease; }
+.zone-fade-enter-from,
+.zone-fade-leave-to     { opacity: 0; }
+</style>

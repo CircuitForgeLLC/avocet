@@ -92,3 +92,77 @@ def test_run_scoring_handles_classify_error(tmp_path):
 
     results = run_scoring([broken], str(score_file))
     assert "broken" in results
+
+
+# ---- Auto-discovery tests ----
+
+def test_discover_finetuned_models_finds_training_info_files(tmp_path):
+    """discover_finetuned_models() must return one entry per training_info.json found."""
+    import json
+    from scripts.benchmark_classifier import discover_finetuned_models
+
+    # Create two fake model directories
+    for name in ("avocet-deberta-small", "avocet-bge-m3"):
+        model_dir = tmp_path / name
+        model_dir.mkdir()
+        info = {
+            "name": name,
+            "base_model_id": "cross-encoder/nli-deberta-v3-small",
+            "timestamp": "2026-03-15T12:00:00Z",
+            "val_macro_f1": 0.72,
+            "val_accuracy": 0.80,
+            "sample_count": 401,
+        }
+        (model_dir / "training_info.json").write_text(json.dumps(info))
+
+    results = discover_finetuned_models(tmp_path)
+    assert len(results) == 2
+    names = {r["name"] for r in results}
+    assert "avocet-deberta-small" in names
+    assert "avocet-bge-m3" in names
+    for r in results:
+        assert "model_dir" in r, "discover_finetuned_models must inject model_dir key"
+        assert r["model_dir"].endswith(r["name"])
+
+
+def test_discover_finetuned_models_returns_empty_when_no_models_dir():
+    """discover_finetuned_models() must return [] silently if models/ doesn't exist."""
+    from pathlib import Path
+    from scripts.benchmark_classifier import discover_finetuned_models
+
+    results = discover_finetuned_models(Path("/nonexistent/path/models"))
+    assert results == []
+
+
+def test_discover_finetuned_models_skips_dirs_without_training_info(tmp_path):
+    """Subdirs without training_info.json are silently skipped."""
+    from scripts.benchmark_classifier import discover_finetuned_models
+
+    # A dir WITHOUT training_info.json
+    (tmp_path / "some-other-dir").mkdir()
+
+    results = discover_finetuned_models(tmp_path)
+    assert results == []
+
+
+def test_active_models_includes_discovered_finetuned(tmp_path):
+    """The active models dict must include FineTunedAdapter entries for discovered models."""
+    import json
+    from unittest.mock import patch
+    from scripts.benchmark_classifier import _active_models
+    from scripts.classifier_adapters import FineTunedAdapter
+
+    model_dir = tmp_path / "avocet-deberta-small"
+    model_dir.mkdir()
+    (model_dir / "training_info.json").write_text(json.dumps({
+        "name": "avocet-deberta-small",
+        "base_model_id": "cross-encoder/nli-deberta-v3-small",
+        "val_macro_f1": 0.72,
+        "sample_count": 401,
+    }))
+
+    with patch("scripts.benchmark_classifier._MODELS_DIR", tmp_path):
+        models = _active_models(include_slow=False)
+
+    assert "avocet-deberta-small" in models
+    assert isinstance(models["avocet-deberta-small"]["adapter_instance"], FineTunedAdapter)

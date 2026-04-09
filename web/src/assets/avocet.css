@@ -1,0 +1,71 @@
+/* web/src/assets/avocet.css
+   Avocet token overrides — imports AFTER theme.css.
+   Only overrides what is genuinely different from the CircuitForge base theme.
+   Pattern mirrors peregrine.css — see peregrine/docs/plans/2026-03-03-nuxt-design-system.md.
+
+   App colors:
+     Primary — Slate Teal  (#2A6080) — inspired by avocet's slate-blue back plumage + deep water
+     Accent  — Russet      (#B8622A) — inspired by avocet's vivid orange-russet head
+*/
+
+/* ── Page-level overrides — must be in avocet.css (applied after theme.css base) ── */
+html {
+  /* Prevent Mac Chrome's horizontal swipe-to-navigate page animation
+     from triggering when the user scrolls near the viewport edge */
+  overscroll-behavior-x: none;
+  /* clip (not hidden) — prevents overflowing content from expanding the html layout
+     width beyond the viewport. Without this, body's overflow-x:hidden propagates to
+     the viewport and body has no BFC, so long email URLs inflate the layout and
+     margin:0 auto centering drifts rightward as fonts load. */
+  overflow-x: clip;
+}
+
+body {
+  /* Prevent horizontal scroll from card swipe animations */
+  overflow-x: hidden;
+}
+
+
+/* ── Light mode (default) ──────────────────────────── */
+:root {
+  /* Aliases bridging avocet component vars to CircuitForge base theme vars */
+  --color-bg:             var(--color-surface);     /* App.vue body bg → #eaeff8 in light */
+  --color-text-secondary: var(--color-text-muted);  /* muted label text */
+  /* Primary — Slate Teal */
+  --app-primary:       #2A6080;   /* 4.8:1 on light surface #eaeff8 — ✅ AA */
+  --app-primary-hover: #1E4D66;   /* darker for hover */
+  --app-primary-light: #E4F0F7;   /* subtle bg tint — background use only */
+
+  /* Accent — Russet */
+  --app-accent:        #B8622A;   /* 4.6:1 on light surface — ✅ AA */
+  --app-accent-hover:  #9A4E1F;   /* darker for hover */
+  --app-accent-light:  #FAF0E8;   /* subtle bg tint — background use only */
+
+  /* Text on accent buttons — dark navy, NOT white (russet bg only ~2.8:1 with white) */
+  --app-accent-text:   #1a2338;
+
+  /* Avocet motion tokens */
+  --swipe-exit:        300ms;
+  --swipe-spring:      400ms cubic-bezier(0.34, 1.56, 0.64, 1);  /* card gestures */
+  --bucket-expand:     250ms cubic-bezier(0.34, 1.56, 0.64, 1);  /* label→bucket transform */
+  --card-dismiss:      350ms ease-in;                             /* fileAway / crumple */
+  --card-skip:         300ms ease-out;                            /* slideUnder */
+}
+
+/* ── Dark mode ─────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="hacker"]) {
+    /* Primary — lighter for legibility on dark surfaces */
+    --app-primary:       #5A9DBF;   /* 6.2:1 on dark surface #16202e — ✅ AA */
+    --app-primary-hover: #74B5D8;   /* lighter for hover */
+    --app-primary-light: #0D1F2D;   /* subtle bg tint */
+
+    /* Accent — lighter russet */
+    --app-accent:        #D4854A;   /* 5.4:1 on dark surface — ✅ AA */
+    --app-accent-hover:  #E8A060;   /* lighter for hover */
+    --app-accent-light:  #2D1A08;   /* subtle bg tint */
+
+    /* Dark text still needed on accent bg (dark russet bg + dark text ≈ 1.5:1 — use light) */
+    --app-accent-text:   #1a2338;   /* in dark mode, russet is darker so dark text still works */
+  }
+}

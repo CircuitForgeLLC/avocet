@@ -21,3 +21,8 @@ accounts:
 
 # Optional: limit emails fetched per account per run (0 = unlimited)
 max_per_account: 500
+
+# cf-orch SFT candidate import — path to the bench_results/ directory
+# produced by circuitforge-orch's benchmark harness.
+sft:
+  bench_results_dir: /path/to/circuitforge-orch/scripts/bench_results

@@ -32,10 +32,14 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+_ROOT = Path(__file__).parent.parent
+_MODELS_DIR = _ROOT / "models"
+
 from scripts.classifier_adapters import (
     LABELS,
     LABEL_DESCRIPTIONS,
     ClassifierAdapter,
+    FineTunedAdapter,
     GLiClassAdapter,
     RerankerAdapter,
     ZeroShotAdapter,
@@ -150,8 +154,55 @@ def load_scoring_jsonl(path: str) -> list[dict[str, str]]:
     return rows
 
 
-def _active_models(include_slow: bool) -> dict[str, dict[str, Any]]:
-    return {k: v for k, v in MODEL_REGISTRY.items() if v["default"] or include_slow}
+def discover_finetuned_models(models_dir: Path | None = None) -> list[dict]:
+    """Scan models/ for subdirs containing training_info.json.
+
+    Returns a list of training_info dicts, each with an added 'model_dir' key.
+    Returns [] silently if models_dir does not exist.
+    """
+    if models_dir is None:
+        models_dir = _MODELS_DIR
+    if not models_dir.exists():
+        return []
+    found = []
+    for sub in models_dir.iterdir():
+        if not sub.is_dir():
+            continue
+        info_path = sub / "training_info.json"
+        if not info_path.exists():
+            continue
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[discover] WARN: skipping {info_path}: {exc}", flush=True)
+            continue
+        if "name" not in info:
+            print(f"[discover] WARN: skipping {info_path}: missing 'name' key", flush=True)
+            continue
+        info["model_dir"] = str(sub)
+        found.append(info)
+    return found
+
+
+def _active_models(include_slow: bool = False) -> dict[str, dict[str, Any]]:
+    """Return the active model registry, merged with any discovered fine-tuned models."""
+    active: dict[str, dict[str, Any]] = {
+        key: {**entry, "adapter_instance": entry["adapter"](
+            key,
+            entry["model_id"],
+            **entry.get("kwargs", {}),
+        )}
+        for key, entry in MODEL_REGISTRY.items()
+        if include_slow or entry.get("default", False)
+    }
+    for info in discover_finetuned_models():
+        name = info["name"]
+        active[name] = {
+            "adapter_instance": FineTunedAdapter(name, info["model_dir"]),
+            "params": "fine-tuned",
+            "default": True,
+        }
+    return active
 
 
 def run_scoring(
@@ -163,7 +214,8 @@ def run_scoring(
     gold = [r["label"] for r in rows]
     results: dict[str, Any] = {}
 
-    for adapter in adapters:
+    for i, adapter in enumerate(adapters, 1):
+        print(f"[{i}/{len(adapters)}] Running {adapter.name} ({len(rows)} samples) …", flush=True)
         preds: list[str] = []
         t0 = time.monotonic()
         for row in rows:
@@ -177,6 +229,7 @@ def run_scoring(
         metrics = compute_metrics(preds, gold, LABELS)
         metrics["latency_ms"] = round(elapsed_ms / len(rows), 1)
         results[adapter.name] = metrics
+        print(f"  → macro-F1 {metrics['__macro_f1__']:.3f}  accuracy {metrics['__accuracy__']:.3f}  {metrics['latency_ms']:.1f} ms/email", flush=True)
         adapter.unload()
 
     return results
@@ -345,10 +398,7 @@ def cmd_score(args: argparse.Namespace) -> None:
     if args.models:
         active = {k: v for k, v in active.items() if k in args.models}
 
-    adapters = [
-        entry["adapter"](name, entry["model_id"], **entry.get("kwargs", {}))
-        for name, entry in active.items()
-    ]
+    adapters = [entry["adapter_instance"] for entry in active.values()]
 
     print(f"\nScoring {len(adapters)} model(s) against {args.score_file} …\n")
     results = run_scoring(adapters, args.score_file)
@@ -375,6 +425,31 @@ def cmd_score(args: argparse.Namespace) -> None:
         print(row_str)
     print()
 
+    if args.save:
+        import datetime
+        rows = load_scoring_jsonl(args.score_file)
+        save_data = {
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "sample_count": len(rows),
+            "models": {
+                name: {
+                    "macro_f1":  round(m["__macro_f1__"], 4),
+                    "accuracy":  round(m["__accuracy__"], 4),
+                    "latency_ms": m["latency_ms"],
+                    "per_label": {
+                        label: {k: round(v, 4) for k, v in m[label].items()}
+                        for label in LABELS
+                        if label in m
+                    },
+                }
+                for name, m in results.items()
+            },
+        }
+        save_path = Path(args.score_file).parent / "benchmark_results.json"
+        with open(save_path, "w") as f:
+            json.dump(save_data, f, indent=2)
+        print(f"Results saved → {save_path}", flush=True)
+
 
 def cmd_compare(args: argparse.Namespace) -> None:
     active = _active_models(args.include_slow)
@@ -385,10 +460,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
     emails = _fetch_imap_sample(args.limit, args.days)
     print(f"Fetched {len(emails)} emails. Loading {len(active)} model(s) …\n")
 
-    adapters = [
-        entry["adapter"](name, entry["model_id"], **entry.get("kwargs", {}))
-        for name, entry in active.items()
-    ]
+    adapters = [entry["adapter_instance"] for entry in active.values()]
     model_names = [a.name for a in adapters]
 
     col = 22
@@ -431,6 +503,8 @@ def main() -> None:
     parser.add_argument("--days", type=int, default=90, help="Days back for IMAP search")
     parser.add_argument("--include-slow", action="store_true", help="Include non-default heavy models")
     parser.add_argument("--models", nargs="+", help="Override: run only these model names")
+    parser.add_argument("--save", action="store_true",
+                        help="Save results to data/benchmark_results.json (for the web UI)")
 
     args = parser.parse_args()
 

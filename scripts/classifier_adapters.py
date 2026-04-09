@@ -17,6 +17,7 @@ __all__ = [
     "ZeroShotAdapter",
     "GLiClassAdapter",
     "RerankerAdapter",
+    "FineTunedAdapter",
 ]
 
 LABELS: list[str] = [
@@ -27,8 +28,9 @@ LABELS: list[str] = [
     "survey_received",
     "neutral",
     "event_rescheduled",
-    "unrelated",
     "digest",
+    "new_lead",
+    "hired",
 ]
 
 # Natural-language descriptions used by the RerankerAdapter.
@@ -40,8 +42,9 @@ LABEL_DESCRIPTIONS: dict[str, str] = {
     "survey_received": "invitation to complete a culture-fit survey or assessment",
     "neutral": "automated ATS confirmation such as application received",
     "event_rescheduled": "an interview or scheduled event moved to a new time",
-    "unrelated": "non-job-search email unrelated to any application or recruiter",
     "digest": "job digest or multi-listing email with multiple job postings",
+    "new_lead": "unsolicited recruiter outreach or cold contact about a new opportunity",
+    "hired": "job offer accepted, onboarding logistics, welcome email, or start date confirmation",
 }
 
 # Lazy import shims — allow tests to patch without requiring the libs installed.
@@ -261,3 +264,43 @@ class RerankerAdapter(ClassifierAdapter):
         pairs = [[text, LABEL_DESCRIPTIONS.get(label, label.replace("_", " "))] for label in LABELS]
         scores: list[float] = self._reranker.compute_score(pairs, normalize=True)
         return LABELS[scores.index(max(scores))]
+
+
+class FineTunedAdapter(ClassifierAdapter):
+    """Loads a fine-tuned checkpoint from a local models/ directory.
+
+    Uses pipeline("text-classification") for a single forward pass.
+    Input format: 'subject [SEP] body[:400]' — must match training format exactly.
+    Expected inference speed: ~10–20ms/email vs 111–338ms for zero-shot.
+    """
+
+    def __init__(self, name: str, model_dir: str) -> None:
+        self._name = name
+        self._model_dir = model_dir
+        self._pipeline: Any = None
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def model_id(self) -> str:
+        return self._model_dir
+
+    def load(self) -> None:
+        import scripts.classifier_adapters as _mod  # noqa: PLC0415
+        _pipe_fn = _mod.pipeline
+        if _pipe_fn is None:
+            raise ImportError("transformers not installed — run: pip install transformers")
+        device = 0 if _cuda_available() else -1
+        self._pipeline = _pipe_fn("text-classification", model=self._model_dir, device=device)
+
+    def unload(self) -> None:
+        self._pipeline = None
+
+    def classify(self, subject: str, body: str) -> str:
+        if self._pipeline is None:
+            self.load()
+        text = f"{subject} [SEP] {body[:400]}"
+        result = self._pipeline(text)
+        return result[0]["label"]
