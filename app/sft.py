@@ -151,10 +151,21 @@ def get_queue(page: int = 1, per_page: int = 20):
 
 # ── POST /submit ───────────────────────────────────────────────────────────
 
+FailureCategory = Literal[
+    "scoring_artifact",
+    "style_violation",
+    "partial_answer",
+    "wrong_answer",
+    "format_error",
+    "hallucination",
+]
+
+
 class SubmitRequest(BaseModel):
     id: str
     action: Literal["correct", "discard", "flag"]
     corrected_response: str | None = None
+    failure_category: FailureCategory | None = None
 
 
 @router.post("/submit")
@@ -174,7 +185,12 @@ def post_submit(req: SubmitRequest):
         raise HTTPException(409, f"Record is not in needs_review state (current: {record.get('status')})")
 
     if req.action == "correct":
-        records[idx] = {**record, "status": "approved", "corrected_response": req.corrected_response}
+        records[idx] = {
+            **record,
+            "status": "approved",
+            "corrected_response": req.corrected_response,
+            "failure_category": req.failure_category,
+        }
         _write_candidates(records)
         append_jsonl(_approved_file(), records[idx])
     elif req.action == "discard":

@@ -36,6 +36,7 @@
           @flag="handleFlag"
           @submit-correction="handleCorrect"
           @cancel-correction="correcting = false"
+          ref="sftCardEl"
         />
       </div>
     </template>
@@ -67,6 +68,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useSftStore } from '../stores/sft'
+import type { SftFailureCategory } from '../stores/sft'
 import { useSftKeyboard } from '../composables/useSftKeyboard'
 import SftCard from '../components/SftCard.vue'
 
@@ -76,6 +78,7 @@ const apiError   = ref(false)
 const correcting = ref(false)
 const stats      = ref<Record<string, any> | null>(null)
 const exportUrl  = '/api/sft/export'
+const sftCardEl  = ref<InstanceType<typeof SftCard> | null>(null)
 
 useSftKeyboard({
   onCorrect: () => { if (store.current && !correcting.value) correcting.value = true },
@@ -113,19 +116,21 @@ function startCorrection() {
   correcting.value = true
 }
 
-async function handleCorrect(text: string) {
+async function handleCorrect(text: string, category: SftFailureCategory | null = null) {
   if (!store.current) return
   const item = store.current
   correcting.value = false
   try {
+    const body: Record<string, unknown> = { id: item.id, action: 'correct', corrected_response: text }
+    if (category != null) body.failure_category = category
     const res = await fetch('/api/sft/submit', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ id: item.id, action: 'correct', corrected_response: text }),
+      body:    JSON.stringify(body),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.removeCurrentFromQueue()
-    store.setLastAction('correct', item)
+    store.setLastAction('correct', item, category)
     store.totalRemaining = Math.max(0, store.totalRemaining - 1)
     fetchStats()
     if (store.queue.length < 5) fetchBatch()
@@ -134,18 +139,20 @@ async function handleCorrect(text: string) {
   }
 }
 
-async function handleDiscard() {
+async function handleDiscard(category: SftFailureCategory | null = null) {
   if (!store.current) return
   const item = store.current
   try {
+    const body: Record<string, unknown> = { id: item.id, action: 'discard' }
+    if (category != null) body.failure_category = category
     const res = await fetch('/api/sft/submit', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ id: item.id, action: 'discard' }),
+      body:    JSON.stringify(body),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.removeCurrentFromQueue()
-    store.setLastAction('discard', item)
+    store.setLastAction('discard', item, category)
     store.totalRemaining = Math.max(0, store.totalRemaining - 1)
     fetchStats()
     if (store.queue.length < 5) fetchBatch()
@@ -154,18 +161,20 @@ async function handleDiscard() {
   }
 }
 
-async function handleFlag() {
+async function handleFlag(category: SftFailureCategory | null = null) {
   if (!store.current) return
   const item = store.current
   try {
+    const body: Record<string, unknown> = { id: item.id, action: 'flag' }
+    if (category != null) body.failure_category = category
     const res = await fetch('/api/sft/submit', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ id: item.id, action: 'flag' }),
+      body:    JSON.stringify(body),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     store.removeCurrentFromQueue()
-    store.setLastAction('flag', item)
+    store.setLastAction('flag', item, category)
     store.totalRemaining = Math.max(0, store.totalRemaining - 1)
     fetchStats()
     if (store.queue.length < 5) fetchBatch()

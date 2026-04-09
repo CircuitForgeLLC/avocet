@@ -2,6 +2,14 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+export type SftFailureCategory =
+  | 'scoring_artifact'
+  | 'style_violation'
+  | 'partial_answer'
+  | 'wrong_answer'
+  | 'format_error'
+  | 'hallucination'
+
 export interface SftQueueItem {
   id: string
   source: 'cf-orch-benchmark'
@@ -13,6 +21,7 @@ export interface SftQueueItem {
   corrected_response: string | null
   quality_score: number          // 0.0 to 1.0
   failure_reason: string | null
+  failure_category: SftFailureCategory | null
   task_id: string
   task_type: string
   task_name: string
@@ -26,6 +35,7 @@ export interface SftQueueItem {
 export interface SftLastAction {
   type: 'correct' | 'discard' | 'flag'
   item: SftQueueItem
+  failure_category?: SftFailureCategory | null
 }
 
 export const useSftStore = defineStore('sft', () => {
@@ -39,8 +49,12 @@ export const useSftStore = defineStore('sft', () => {
     queue.value.shift()
   }
 
-  function setLastAction(type: SftLastAction['type'], item: SftQueueItem) {
-    lastAction.value = { type, item }
+  function setLastAction(
+    type: SftLastAction['type'],
+    item: SftQueueItem,
+    failure_category?: SftFailureCategory | null,
+  ) {
+    lastAction.value = { type, item, failure_category }
   }
 
   function clearLastAction() {

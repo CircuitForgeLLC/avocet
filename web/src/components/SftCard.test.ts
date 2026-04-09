@@ -13,6 +13,7 @@ const LOW_QUALITY_ITEM: SftQueueItem = {
   model_response: 'def add(a, b): return a - b',
   corrected_response: null, quality_score: 0.2,
   failure_reason: 'pattern_match: 0/2 matched',
+  failure_category: null,
   task_id: 'code-fn', task_type: 'code', task_name: 'Code: Write a function',
   model_id: 'Qwen/Qwen2.5-3B', model_name: 'Qwen2.5-3B',
   node_id: 'heimdall', gpu_id: 0, tokens_per_sec: 38.4,
@@ -68,15 +69,17 @@ describe('SftCard', () => {
     expect(w.emitted('correct')).toBeTruthy()
   })
 
-  it('clicking Discard button emits discard', async () => {
+  it('clicking Discard button then confirming emits discard', async () => {
     const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM } })
     await w.find('[data-testid="discard-btn"]').trigger('click')
+    await w.find('[data-testid="confirm-pending-btn"]').trigger('click')
     expect(w.emitted('discard')).toBeTruthy()
   })
 
-  it('clicking Flag Model button emits flag', async () => {
+  it('clicking Flag Model button then confirming emits flag', async () => {
     const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM } })
     await w.find('[data-testid="flag-btn"]').trigger('click')
+    await w.find('[data-testid="confirm-pending-btn"]').trigger('click')
     expect(w.emitted('flag')).toBeTruthy()
   })
 
@@ -94,5 +97,83 @@ describe('SftCard', () => {
     const item = { ...LOW_QUALITY_ITEM, failure_reason: null }
     const w = mount(SftCard, { props: { item } })
     expect(w.find('.failure-reason').exists()).toBe(false)
+  })
+
+  // ── Failure category chip-group ───────────────────────────────────
+  it('failure category section hidden when not correcting and no pending action', () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM } })
+    expect(w.find('[data-testid="failure-category-section"]').exists()).toBe(false)
+  })
+
+  it('failure category section shown when correcting prop is true', () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM, correcting: true } })
+    expect(w.find('[data-testid="failure-category-section"]').exists()).toBe(true)
+  })
+
+  it('renders all six category chips when correcting', () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM, correcting: true } })
+    const chips = w.findAll('.category-chip')
+    expect(chips).toHaveLength(6)
+  })
+
+  it('clicking a category chip selects it (adds active class)', async () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM, correcting: true } })
+    const chip = w.find('[data-testid="category-chip-wrong_answer"]')
+    await chip.trigger('click')
+    expect(chip.classes()).toContain('category-chip--active')
+  })
+
+  it('clicking the active chip again deselects it', async () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM, correcting: true } })
+    const chip = w.find('[data-testid="category-chip-hallucination"]')
+    await chip.trigger('click')
+    expect(chip.classes()).toContain('category-chip--active')
+    await chip.trigger('click')
+    expect(chip.classes()).not.toContain('category-chip--active')
+  })
+
+  it('only one chip can be active at a time', async () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM, correcting: true } })
+    await w.find('[data-testid="category-chip-wrong_answer"]').trigger('click')
+    await w.find('[data-testid="category-chip-hallucination"]').trigger('click')
+    const active = w.findAll('.category-chip--active')
+    expect(active).toHaveLength(1)
+    expect(active[0].attributes('data-testid')).toBe('category-chip-hallucination')
+  })
+
+  it('clicking Discard shows pending action row with category section', async () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM } })
+    await w.find('[data-testid="discard-btn"]').trigger('click')
+    expect(w.find('[data-testid="failure-category-section"]').exists()).toBe(true)
+    expect(w.find('[data-testid="pending-action-row"]').exists()).toBe(true)
+  })
+
+  it('clicking Flag shows pending action row', async () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM } })
+    await w.find('[data-testid="flag-btn"]').trigger('click')
+    expect(w.find('[data-testid="pending-action-row"]').exists()).toBe(true)
+  })
+
+  it('confirming discard emits discard with null when no category selected', async () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM } })
+    await w.find('[data-testid="discard-btn"]').trigger('click')
+    await w.find('[data-testid="confirm-pending-btn"]').trigger('click')
+    expect(w.emitted('discard')).toBeTruthy()
+    expect(w.emitted('discard')![0]).toEqual([null])
+  })
+
+  it('confirming discard emits discard with selected category', async () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM } })
+    await w.find('[data-testid="discard-btn"]').trigger('click')
+    await w.find('[data-testid="category-chip-scoring_artifact"]').trigger('click')
+    await w.find('[data-testid="confirm-pending-btn"]').trigger('click')
+    expect(w.emitted('discard')![0]).toEqual(['scoring_artifact'])
+  })
+
+  it('cancelling pending action hides the pending row', async () => {
+    const w = mount(SftCard, { props: { item: LOW_QUALITY_ITEM } })
+    await w.find('[data-testid="discard-btn"]').trigger('click')
+    await w.find('[data-testid="cancel-pending-btn"]').trigger('click')
+    expect(w.find('[data-testid="pending-action-row"]').exists()).toBe(false)
   })
 })
