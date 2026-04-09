@@ -22,5 +22,8 @@ dependencies:
     # Optional: BGE reranker adapter
     # - FlagEmbedding
 
+    # CircuitForge shared core (LLM router, tier system, config)
+    - circuitforge-core>=0.9.0
+
     # Dev
     - pytest>=8.0

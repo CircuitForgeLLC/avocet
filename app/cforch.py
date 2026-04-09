@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess as _subprocess
 from pathlib import Path
@@ -49,16 +50,32 @@ def _config_file() -> Path:
 
 
 def _load_cforch_config() -> dict:
-    """Read label_tool.yaml and return the cforch sub-dict (or {} if absent/malformed)."""
+    """Read label_tool.yaml cforch section, falling back to environment variables.
+
+    Priority (highest to lowest):
+      1. label_tool.yaml cforch: key
+      2. Environment variables (CF_ORCH_URL, CF_LICENSE_KEY, OLLAMA_HOST, OLLAMA_MODEL)
+    """
     f = _config_file()
-    if not f.exists():
-        return {}
-    try:
-        raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:
-        logger.warning("Failed to parse cforch config %s: %s", f, exc)
-        return {}
-    return raw.get("cforch", {}) or {}
+    file_cfg: dict = {}
+    if f.exists():
+        try:
+            raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            file_cfg = raw.get("cforch", {}) or {}
+        except yaml.YAMLError as exc:
+            logger.warning("Failed to parse cforch config %s: %s", f, exc)
+
+    # Env var fallbacks — only used when the yaml key is absent or empty
+    def _coalesce(file_val: str, env_key: str) -> str:
+        return file_val if file_val else os.environ.get(env_key, "")
+
+    return {
+        **file_cfg,
+        "coordinator_url": _coalesce(file_cfg.get("coordinator_url", ""), "CF_ORCH_URL"),
+        "license_key":     _coalesce(file_cfg.get("license_key", ""),     "CF_LICENSE_KEY"),
+        "ollama_url":      _coalesce(file_cfg.get("ollama_url", ""),       "OLLAMA_HOST"),
+        "ollama_model":    _coalesce(file_cfg.get("ollama_model", ""),     "OLLAMA_MODEL"),
+    }
 
 
 def _strip_ansi(text: str) -> str:
@@ -184,7 +201,8 @@ def run_benchmark(
     results_dir = cfg.get("results_dir", "")
     python_bin = cfg.get("python_bin", "/devl/miniconda3/envs/cf/bin/python")
     cfg_coordinator = cfg.get("coordinator_url", "")
-    cfg_ollama = cfg.get("ollama_url", "")
+    cfg_ollama      = cfg.get("ollama_url", "")
+    cfg_license_key = cfg.get("license_key", "")
 
     def generate():
         global _BENCH_RUNNING, _bench_proc
@@ -206,12 +224,18 @@ def run_benchmark(
         if model_tags:
             cmd.extend(["--filter-tags"] + model_tags.split(","))
 
+        # query param overrides config, config overrides env var (already resolved by _load_cforch_config)
         effective_coordinator = coordinator_url if coordinator_url else cfg_coordinator
-        effective_ollama = ollama_url if ollama_url else cfg_ollama
+        effective_ollama      = ollama_url      if ollama_url      else cfg_ollama
         if effective_coordinator:
             cmd.extend(["--coordinator", effective_coordinator])
         if effective_ollama:
             cmd.extend(["--ollama-url", effective_ollama])
+
+        # Pass license key as env var so subprocess can authenticate with cf-orch
+        proc_env = {**os.environ}
+        if cfg_license_key:
+            proc_env["CF_LICENSE_KEY"] = cfg_license_key
 
         _BENCH_RUNNING = True
         try:
@@ -221,6 +245,7 @@ def run_benchmark(
                 stderr=_subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=proc_env,
             )
             _bench_proc = proc
             try:
@@ -252,6 +277,25 @@ def run_benchmark(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── GET /config ────────────────────────────────────────────────────────────────
+
+@router.get("/config")
+def get_cforch_config() -> dict:
+    """Return resolved cf-orch connection config (env vars merged with yaml).
+
+    Redacts license_key — only returns whether it is set, not the value.
+    Used by the Settings UI to show current connection state.
+    """
+    cfg = _load_cforch_config()
+    return {
+        "coordinator_url": cfg.get("coordinator_url", ""),
+        "ollama_url":      cfg.get("ollama_url", ""),
+        "ollama_model":    cfg.get("ollama_model", ""),
+        "license_key_set": bool(cfg.get("license_key", "")),
+        "source": "env" if not _config_file().exists() else "yaml+env",
+    }
 
 
 # ── GET /results ───────────────────────────────────────────────────────────────

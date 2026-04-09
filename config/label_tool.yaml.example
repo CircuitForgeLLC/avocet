@@ -26,3 +26,23 @@ max_per_account: 500
 # produced by circuitforge-orch's benchmark harness.
 sft:
   bench_results_dir: /path/to/circuitforge-orch/scripts/bench_results
+
+# cf-orch integration — LLM benchmark harness via cf-orch coordinator.
+# All keys here override the corresponding environment variables.
+# Omit any key to fall back to the env var (see .env.example).
+cforch:
+  # Path to cf-orch's benchmark.py script
+  bench_script: /path/to/circuitforge-orch/scripts/benchmark.py
+  # Task and model definition files (yaml)
+  bench_tasks:  /path/to/circuitforge-orch/scripts/bench_tasks.yaml
+  bench_models: /path/to/circuitforge-orch/scripts/bench_models.yaml
+  # Where benchmark results are written (also used for SFT candidate discovery)
+  results_dir:  /path/to/circuitforge-orch/scripts/bench_results
+  # Python interpreter with cf-orch installed
+  python_bin:   /devl/miniconda3/envs/cf/bin/python
+
+  # Connection config — override env vars CF_ORCH_URL / CF_LICENSE_KEY / OLLAMA_HOST
+  # coordinator_url: http://localhost:7700
+  # license_key:     CFG-AVCT-xxxx-xxxx-xxxx
+  # ollama_url:      http://localhost:11434
+  # ollama_model:    llama3.2:3b

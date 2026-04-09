@@ -280,3 +280,87 @@ def test_cancel_terminates_running_benchmark(client):
     mock_proc.terminate.assert_called_once()
     assert cforch_module._BENCH_RUNNING is False
     assert cforch_module._bench_proc is None
+
+
+# ── GET /config ────────────────────────────────────────────────────────────────
+
+def test_config_returns_empty_when_no_yaml_no_env(client, monkeypatch):
+    """No yaml, no env vars — all fields empty, license_key_set False."""
+    for key in ("CF_ORCH_URL", "CF_LICENSE_KEY", "OLLAMA_HOST", "OLLAMA_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+
+    r = client.get("/api/cforch/config")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["coordinator_url"] == ""
+    assert data["ollama_url"] == ""
+    assert data["license_key_set"] is False
+
+
+def test_config_reads_env_vars_when_no_yaml(client, monkeypatch):
+    """Env vars populate fields when label_tool.yaml has no cforch section."""
+    monkeypatch.setenv("CF_ORCH_URL",      "http://orch.example.com:7700")
+    monkeypatch.setenv("CF_LICENSE_KEY",   "CFG-AVCT-TEST-TEST-TEST")
+    monkeypatch.setenv("OLLAMA_HOST",      "http://ollama.local:11434")
+    monkeypatch.setenv("OLLAMA_MODEL",     "mistral:7b")
+
+    r = client.get("/api/cforch/config")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["coordinator_url"] == "http://orch.example.com:7700"
+    assert data["ollama_url"]      == "http://ollama.local:11434"
+    assert data["ollama_model"]    == "mistral:7b"
+    assert data["license_key_set"] is True   # set, but value not exposed
+
+
+def test_config_yaml_overrides_env(client, config_dir, monkeypatch):
+    """label_tool.yaml cforch values take priority over env vars."""
+    monkeypatch.setenv("CF_ORCH_URL",  "http://env-orch:7700")
+    monkeypatch.setenv("OLLAMA_HOST",  "http://env-ollama:11434")
+
+    _write_config(config_dir, {
+        "coordinator_url": "http://yaml-orch:7700",
+        "ollama_url":      "http://yaml-ollama:11434",
+    })
+
+    r = client.get("/api/cforch/config")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["coordinator_url"] == "http://yaml-orch:7700"
+    assert data["ollama_url"]      == "http://yaml-ollama:11434"
+    assert data["source"] == "yaml+env"
+
+
+def test_run_passes_license_key_env_to_subprocess(client, config_dir, tmp_path, monkeypatch):
+    """CF_LICENSE_KEY must be forwarded to the benchmark subprocess env."""
+    monkeypatch.setenv("CF_LICENSE_KEY", "CFG-AVCT-ENV-ONLY-KEY")
+
+    bench_script = tmp_path / "benchmark.py"
+    bench_script.write_text("# stub", encoding="utf-8")
+    tasks_file   = tmp_path / "bench_tasks.yaml"
+    tasks_file.write_text(yaml.dump({"tasks": []}), encoding="utf-8")
+    models_file  = tmp_path / "bench_models.yaml"
+    models_file.write_text(yaml.dump({"models": []}), encoding="utf-8")
+
+    _write_config(config_dir, {
+        "bench_script":  str(bench_script),
+        "bench_tasks":   str(tasks_file),
+        "bench_models":  str(models_file),
+        "results_dir":   str(tmp_path / "results"),
+        "python_bin":    "/usr/bin/python3",
+    })
+
+    captured_env: dict = {}
+
+    def fake_popen(cmd, **kwargs):
+        captured_env.update(kwargs.get("env", {}))
+        mock = MagicMock()
+        mock.stdout = iter([])
+        mock.returncode = 0
+        mock.wait = MagicMock()
+        return mock
+
+    with patch("app.cforch._subprocess.Popen", side_effect=fake_popen):
+        client.get("/api/cforch/run")
+
+    assert captured_env.get("CF_LICENSE_KEY") == "CFG-AVCT-ENV-ONLY-KEY"
