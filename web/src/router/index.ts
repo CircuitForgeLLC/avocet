@@ -7,6 +7,7 @@ const StatsView     = () => import('../views/StatsView.vue')
 const BenchmarkView = () => import('../views/BenchmarkView.vue')
 const SettingsView    = () => import('../views/SettingsView.vue')
 const CorrectionsView = () => import('../views/CorrectionsView.vue')
+const ModelsView      = () => import('../views/ModelsView.vue')
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -15,6 +16,7 @@ export const router = createRouter({
     { path: '/fetch',       component: FetchView,       meta: { title: 'Fetch' } },
     { path: '/stats',       component: StatsView,       meta: { title: 'Stats' } },
     { path: '/benchmark',   component: BenchmarkView,   meta: { title: 'Benchmark' } },
+    { path: '/models',      component: ModelsView,      meta: { title: 'Models' } },
     { path: '/corrections', component: CorrectionsView, meta: { title: 'Corrections' } },
     { path: '/settings',    component: SettingsView,    meta: { title: 'Settings' } },
   ],
