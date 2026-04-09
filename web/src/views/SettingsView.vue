@@ -115,7 +115,17 @@
       <h2 class="section-title">cf-orch Integration</h2>
       <p class="section-desc">
         Import SFT (supervised fine-tuning) candidates from cf-orch benchmark runs.
+        Connection settings fall back to environment variables
+        (<code>CF_ORCH_URL</code>, <code>CF_LICENSE_KEY</code>, <code>OLLAMA_HOST</code>)
+        when not set here.
       </p>
+
+      <!-- Connection status pill -->
+      <div v-if="orchConfig" class="orch-status-row">
+        <span class="orch-status-pill" :class="orchStatusClass">{{ orchStatusLabel }}</span>
+        <span v-if="orchConfig.source === 'env'" class="orch-source-note">via env vars</span>
+        <span v-else class="orch-source-note">via label_tool.yaml</span>
+      </div>
 
       <div class="field-row">
         <label class="field field-grow">
@@ -181,7 +191,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useApiFetch } from '../composables/useApi'
 
 interface Account {
@@ -199,12 +209,27 @@ const saveOk        = ref(true)
 const richMotion    = ref(localStorage.getItem('cf-avocet-rich-motion') !== 'false')
 const keyHints      = ref(localStorage.getItem('cf-avocet-key-hints') !== 'false')
 
-// SFT integration state
+// SFT / cf-orch integration state
 const benchResultsDir = ref('')
 const runs            = ref<Array<{ run_id: string; timestamp: string; candidate_count: number; already_imported: boolean }>>([])
 const importingRunId  = ref<string | null>(null)
 const importResult    = ref<{ imported: number; skipped: number } | null>(null)
 const saveStatus      = ref('')
+const orchConfig      = ref<{ coordinator_url: string; ollama_url: string; ollama_model: string; license_key_set: boolean; source: string } | null>(null)
+
+const orchStatusClass = computed(() => {
+  if (!orchConfig.value) return 'status-unknown'
+  if (orchConfig.value.coordinator_url) return 'status-connected'
+  if (orchConfig.value.ollama_url) return 'status-local'
+  return 'status-unconfigured'
+})
+
+const orchStatusLabel = computed(() => {
+  if (!orchConfig.value) return 'Unknown'
+  if (orchConfig.value.coordinator_url) return '● cf-orch coordinator'
+  if (orchConfig.value.ollama_url) return '● Ollama (local)'
+  return '○ Not configured'
+})
 
 async function loadSftConfig() {
   try {
@@ -215,6 +240,15 @@ async function loadSftConfig() {
     }
   } catch {
     // non-fatal — leave field empty
+  }
+}
+
+async function loadOrchConfig() {
+  try {
+    const res = await fetch('/api/cforch/config')
+    if (res.ok) orchConfig.value = await res.json()
+  } catch {
+    // non-fatal
   }
 }
 
@@ -337,6 +371,7 @@ function onKeyHintsChange() {
 onMounted(() => {
   reload()
   loadSftConfig()
+  loadOrchConfig()
 })
 </script>
 
@@ -562,6 +597,31 @@ onMounted(() => {
   font-size: 0.9rem;
   font-family: var(--font-body, sans-serif);
   width: 100%;
+}
+
+.orch-status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.orch-status-pill {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+}
+
+.status-connected    { background: color-mix(in srgb, var(--color-success, #3a7a32) 12%, transparent); color: var(--color-success, #3a7a32); }
+.status-local        { background: color-mix(in srgb, var(--color-primary) 12%, transparent); color: var(--color-primary); }
+.status-unconfigured { background: var(--color-surface-alt); color: var(--color-text-muted); }
+.status-unknown      { background: var(--color-surface-alt); color: var(--color-text-muted); }
+
+.orch-source-note {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 .runs-table {

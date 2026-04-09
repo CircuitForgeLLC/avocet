@@ -68,6 +68,44 @@
         <p class="bench-hint">Highlighted cells are the best-scoring model per metric.</p>
       </template>
 
+      <!-- LLM Benchmark Results -->
+      <template v-if="llmResults.length > 0">
+        <h2 class="section-title">🤖 LLM Benchmark</h2>
+        <div class="bench-table-wrap">
+          <table class="bench-table">
+            <thead>
+              <tr>
+                <th class="bt-model-col">Model</th>
+                <th class="bt-metric-col">overall</th>
+                <th
+                  v-for="col in llmTaskTypeCols"
+                  :key="col"
+                  class="bt-metric-col"
+                >{{ col }}</th>
+                <th class="bt-metric-col">tok/s</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in llmResults" :key="row.model_id">
+                <td class="bt-model-cell" :title="row.model_id">{{ row.model_name }}</td>
+                <td
+                  class="bt-metric-cell"
+                  :class="{ 'bt-best': llmBestByCol['overall'] === row.model_id }"
+                >{{ llmPct(row.avg_quality_score) }}</td>
+                <td
+                  v-for="col in llmTaskTypeCols"
+                  :key="col"
+                  class="bt-metric-cell"
+                  :class="{ 'bt-best': llmBestByCol[col] === row.model_id }"
+                >{{ row.quality_by_task_type[col] != null ? llmPct(row.quality_by_task_type[col]) : '—' }}</td>
+                <td class="bt-metric-cell">{{ row.avg_tokens_per_sec.toFixed(1) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="bench-hint">Run LLM Eval on the Benchmark tab to refresh. Highlighted = best per column.</p>
+      </template>
+
       <div class="file-info">
         <span class="file-path">Score file: <code>data/email_score.jsonl</code></span>
         <span class="file-size">{{ fileSizeLabel }}</span>
@@ -92,6 +130,18 @@ interface BenchmarkModelResult {
   macro_f1?: number
   weighted_f1?: number
   [key: string]: number | undefined
+}
+
+interface LlmModelResult {
+  model_name: string
+  model_id: string
+  node_id: string
+  avg_tokens_per_sec: number
+  avg_completion_ms: number
+  avg_quality_score: number
+  finetune_candidates: number
+  error_count: number
+  quality_by_task_type: Record<string, number>
 }
 
 interface StatsResponse {
@@ -185,6 +235,49 @@ function formatMetric(v: number | undefined): string {
   return `${v.toFixed(1)}%`
 }
 
+// ── LLM Benchmark results ────────────────────────────────────────────────────
+const llmResults = ref<LlmModelResult[]>([])
+
+const llmTaskTypeCols = computed(() => {
+  const types = new Set<string>()
+  for (const r of llmResults.value) {
+    for (const k of Object.keys(r.quality_by_task_type)) types.add(k)
+  }
+  return [...types].sort()
+})
+
+const llmBestByCol = computed((): Record<string, string> => {
+  const best: Record<string, string> = {}
+  if (llmResults.value.length === 0) return best
+
+  let bestId = '', bestVal = -Infinity
+  for (const r of llmResults.value) {
+    if (r.avg_quality_score > bestVal) { bestVal = r.avg_quality_score; bestId = r.model_id }
+  }
+  best['overall'] = bestId
+
+  for (const col of llmTaskTypeCols.value) {
+    bestId = ''; bestVal = -Infinity
+    for (const r of llmResults.value) {
+      const v = r.quality_by_task_type[col]
+      if (v != null && v > bestVal) { bestVal = v; bestId = r.model_id }
+    }
+    best[col] = bestId
+  }
+  return best
+})
+
+function llmPct(v: number): string {
+  return `${(v * 100).toFixed(1)}%`
+}
+
+async function loadLlmResults() {
+  const { data } = await useApiFetch<LlmModelResult[]>('/api/cforch/results')
+  if (Array.isArray(data) && data.length > 0) {
+    llmResults.value = data
+  }
+}
+
 async function load() {
   loading.value = true
   error.value   = ''
@@ -197,7 +290,10 @@ async function load() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadLlmResults()
+})
 </script>
 
 <style scoped>
