@@ -19,7 +19,7 @@ LOG_FILE="${LOG_DIR}/label_tool.log"
 DEFAULT_PORT=8503
 
 CONDA_BASE="${CONDA_BASE:-/devl/miniconda3}"
-ENV_UI="job-seeker"
+ENV_UI="${AVOCET_ENV:-cf}"
 ENV_BM="job-seeker-classifiers"
 PYTHON_BM="${CONDA_BASE}/envs/${ENV_BM}/bin/python"
 PYTHON_UI="${CONDA_BASE}/envs/${ENV_UI}/bin/python"
@@ -91,6 +91,7 @@ usage() {
     echo -e "    ${GREEN}compare [args]${NC}           Shortcut: --compare [args]"
     echo ""
     echo "  Dev:"
+    echo -e "    ${GREEN}dev${NC}                      Hot-reload: uvicorn --reload (:8503) + Vite HMR (:5173)"
     echo -e "    ${GREEN}test${NC}                     Run pytest suite"
     echo ""
     echo "  Port defaults to ${DEFAULT_PORT}; auto-increments if occupied."
@@ -163,6 +164,47 @@ case "$CMD" in
     restart)
         bash "$0" stop
         exec bash "$0" start
+        ;;
+
+    dev)
+        API_PORT=8503
+        VITE_PORT=5173
+        DEV_API_PID_FILE=".avocet-dev-api.pid"
+        mkdir -p "$LOG_DIR"
+        DEV_API_LOG="${LOG_DIR}/dev-api.log"
+
+        if [[ -f "$DEV_API_PID_FILE" ]] && kill -0 "$(<"$DEV_API_PID_FILE")" 2>/dev/null; then
+            warn "Dev API already running (PID $(<"$DEV_API_PID_FILE"))"
+        else
+            info "Starting uvicorn with --reload on port ${API_PORT}…"
+            nohup "$PYTHON_UI" -m uvicorn app.api:app \
+                --host 0.0.0.0 --port "$API_PORT" --reload \
+                >> "$DEV_API_LOG" 2>&1 &
+            echo $! > "$DEV_API_PID_FILE"
+            # Wait for API to bind
+            for _i in $(seq 1 20); do
+                sleep 0.5
+                (echo "" >/dev/tcp/127.0.0.1/"$API_PORT") 2>/dev/null && break
+                if ! kill -0 "$(<"$DEV_API_PID_FILE")" 2>/dev/null; then
+                    rm -f "$DEV_API_PID_FILE"
+                    error "Dev API died during startup. Check ${DEV_API_LOG}"
+                fi
+            done
+            success "API (hot-reload) → http://localhost:${API_PORT}"
+        fi
+
+        # Kill API on exit (Ctrl+C or Vite exits)
+        _cleanup_dev() {
+            local pid
+            pid=$(<"$DEV_API_PID_FILE" 2>/dev/null || true)
+            [[ -n "$pid" ]] && kill "$pid" 2>/dev/null && rm -f "$DEV_API_PID_FILE"
+            info "Dev servers stopped."
+        }
+        trap _cleanup_dev EXIT INT TERM
+
+        info "Starting Vite HMR on port ${VITE_PORT} (proxy /api → :${API_PORT})…"
+        success "Frontend (HMR) → http://localhost:${VITE_PORT}"
+        (cd web && npm run dev -- --host 0.0.0.0 --port "$VITE_PORT")
         ;;
 
     open)
