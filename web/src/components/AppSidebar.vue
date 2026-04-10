@@ -67,6 +67,7 @@ const navItems = [
   { path: '/stats',     icon: '📊', label: 'Stats'     },
   { path: '/benchmark',   icon: '🏁', label: 'Benchmark'   },
   { path: '/models',      icon: '🤗', label: 'Models'      },
+  { path: '/imitate',     icon: '🪞', label: 'Imitate'     },
   { path: '/corrections', icon: '✍️', label: 'Corrections' },
   { path: '/settings',    icon: '⚙️', label: 'Settings'    },
 ]

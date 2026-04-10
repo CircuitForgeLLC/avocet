@@ -131,9 +131,11 @@ def get_tasks() -> dict:
         if not isinstance(t, dict):
             continue
         tasks.append({
-            "id": t.get("id", ""),
-            "name": t.get("name", ""),
-            "type": t.get("type", ""),
+            "id":     t.get("id", ""),
+            "name":   t.get("name", ""),
+            "type":   t.get("type", ""),
+            "prompt": (t.get("prompt") or "").strip(),
+            "system": (t.get("system") or "").strip(),
         })
         task_type = t.get("type", "")
         if task_type and task_type not in types_set:

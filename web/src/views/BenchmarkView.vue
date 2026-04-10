@@ -38,6 +38,11 @@
         :class="{ active: benchMode === 'llm' }"
         @click="benchMode = 'llm'"
       >🤖 LLM Eval</button>
+      <button
+        class="mode-btn"
+        :class="{ active: benchMode === 'compare' }"
+        @click="benchMode = 'compare'; ensureCompareReady()"
+      >⚖️ Compare</button>
     </div>
 
     <!-- ── LLM Eval panel ─────────────────────────────────────── -->
@@ -213,6 +218,121 @@
       </template>
 
     </template>
+
+    <!-- ── Compare panel ─────────────────────────────────────── -->
+    <template v-if="benchMode === 'compare'">
+
+      <!-- Task selector (radio — one at a time) -->
+      <details class="model-picker" open>
+        <summary class="picker-summary">
+          <span class="picker-title">📋 Pick a Task</span>
+          <span class="picker-badge">{{ cmpSelectedTask ? cmpSelectedTask.name : 'None selected' }}</span>
+        </summary>
+        <div class="picker-body">
+          <div v-if="llmTasksLoading" class="picker-loading">Loading tasks…</div>
+          <div v-else-if="llmTasks.length === 0" class="picker-empty">No tasks found — check cforch config.</div>
+          <template v-else>
+            <div v-for="(tasks, type) in llmTasksByType" :key="type" class="picker-category">
+              <span class="picker-cat-name" style="font-weight:600; padding: 0.35rem 0; display:block">{{ type }}</span>
+              <div class="picker-model-list">
+                <label v-for="t in tasks" :key="t.id" class="picker-model-row">
+                  <input
+                    type="radio"
+                    name="cmp-task"
+                    :checked="cmpSelectedTask?.id === t.id"
+                    @change="selectCmpTask(t)"
+                  />
+                  <span class="picker-model-name" :title="t.name">{{ t.name }}</span>
+                </label>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- Prompt editor -->
+      <template v-if="cmpSelectedTask">
+        <label class="prompt-label" for="cmp-prompt">Prompt</label>
+        <textarea
+          id="cmp-prompt"
+          class="cmp-prompt-editor"
+          v-model="cmpPrompt"
+          rows="6"
+        />
+
+        <!-- Model picker (ollama only) -->
+        <details class="model-picker" open>
+          <summary class="picker-summary">
+            <span class="picker-title">🤖 Ollama Models</span>
+            <span class="picker-badge">{{ cmpSelectedModels.size }} / {{ ollamaLlmModels.length }}</span>
+          </summary>
+          <div class="picker-body">
+            <label class="picker-cat-header">
+              <input
+                type="checkbox"
+                :checked="cmpSelectedModels.size === ollamaLlmModels.length"
+                :indeterminate="cmpSelectedModels.size > 0 && cmpSelectedModels.size < ollamaLlmModels.length"
+                @change="toggleAllCmpModels(($event.target as HTMLInputElement).checked)"
+              />
+              <span class="picker-cat-name">All ollama models</span>
+            </label>
+            <div class="picker-model-list">
+              <label v-for="m in ollamaLlmModels" :key="m.id" class="picker-model-row">
+                <input
+                  type="checkbox"
+                  :checked="cmpSelectedModels.has(m.id)"
+                  @change="toggleCmpModel(m.id, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="picker-model-name">{{ m.name }}</span>
+                <span class="picker-adapter-type">{{ m.tags.slice(0,3).join(', ') }}</span>
+              </label>
+            </div>
+          </div>
+        </details>
+
+        <!-- Run controls -->
+        <div class="llm-run-controls">
+          <button
+            class="btn-run"
+            :disabled="cmpRunning || cmpSelectedModels.size === 0"
+            @click="startCompare"
+          >{{ cmpRunning ? '⏳ Running…' : '⚖️ Compare Models' }}</button>
+          <button v-if="cmpRunning" class="btn-cancel" @click="cancelCompare">✕ Cancel</button>
+        </div>
+
+        <!-- Progress log -->
+        <div v-if="cmpLog.length > 0" class="run-log">
+          <div class="log-lines">
+            <div v-for="(line, i) in cmpLog" :key="i" class="log-line">{{ line }}</div>
+          </div>
+        </div>
+
+        <!-- Side-by-side results -->
+        <template v-if="cmpResults.length > 0">
+          <h2 class="chart-title">Side-by-Side Responses</h2>
+          <div class="cmp-results-grid">
+            <div
+              v-for="r in cmpResults"
+              :key="r.model"
+              class="cmp-result-card"
+              :class="{ 'cmp-error': !!r.error }"
+            >
+              <div class="cmp-result-header">
+                <span class="cmp-model-name">{{ r.model }}</span>
+                <span class="cmp-meta">
+                  <template v-if="r.error"><span class="err-badge">error</span></template>
+                  <template v-else>{{ (r.elapsed_ms / 1000).toFixed(1) }}s</template>
+                </span>
+              </div>
+              <pre v-if="r.error" class="cmp-error-text">{{ r.error }}</pre>
+              <pre v-else class="cmp-response">{{ r.response }}</pre>
+            </div>
+          </div>
+        </template>
+      </template>
+
+    </template>
+    <!-- ── /Compare panel ─────────────────────────────────────── -->
 
     <!-- ── Classifier panel ──────────────────────────────────── -->
     <template v-if="benchMode === 'classifier'">
@@ -480,6 +600,8 @@ interface CfOrchTask {
   id: string
   name: string
   type: string
+  prompt: string
+  system: string
 }
 
 interface CfOrchModel {
@@ -555,7 +677,7 @@ const ftLogEl          = ref<HTMLElement | null>(null)
 const runCancelled = ref(false)
 
 // ── Mode toggle ───────────────────────────────────────────────────────────────
-const benchMode = ref<'classifier' | 'llm'>('classifier')
+const benchMode = ref<'classifier' | 'llm' | 'compare'>('classifier')
 
 // ── LLM Eval state ───────────────────────────────────────────────────────────
 const llmTasks        = ref<CfOrchTask[]>([])
@@ -573,6 +695,108 @@ const llmResults      = ref<LlmModelResult[]>([])
 const llmEventSource  = ref<EventSource | null>(null)
 const llmLogEl        = ref<HTMLElement | null>(null)
 const ftCancelled  = ref(false)
+
+// ── Compare mode state ────────────────────────────────────────────────────────
+interface CmpResult {
+  model: string
+  response: string
+  elapsed_ms: number
+  error: string | null
+}
+
+const cmpSelectedTask    = ref<CfOrchTask & { prompt: string; system: string } | null>(null)
+const cmpPrompt          = ref('')
+const cmpSelectedModels  = ref<Set<string>>(new Set())
+const cmpRunning         = ref(false)
+const cmpLog             = ref<string[]>([])
+const cmpResults         = ref<CmpResult[]>([])
+const cmpEventSource     = ref<EventSource | null>(null)
+
+const ollamaLlmModels = computed(() =>
+  llmModels.value.filter(m => m.service === 'ollama')
+)
+
+function selectCmpTask(t: CfOrchTask & { prompt: string; system: string }) {
+  cmpSelectedTask.value = t
+  cmpPrompt.value = t.prompt || ''
+  cmpResults.value = []
+  cmpLog.value = []
+}
+
+function toggleCmpModel(id: string, checked: boolean) {
+  const next = new Set(cmpSelectedModels.value)
+  checked ? next.add(id) : next.delete(id)
+  cmpSelectedModels.value = next
+}
+
+function toggleAllCmpModels(checked: boolean) {
+  cmpSelectedModels.value = checked
+    ? new Set(ollamaLlmModels.value.map(m => m.id))
+    : new Set()
+}
+
+function ensureCompareReady() {
+  // Trigger task + model loads if not already done (shares llmTasks/llmModels)
+  if (llmTasks.value.length === 0) loadLlmTasks()
+  if (llmModels.value.length === 0) loadLlmModels()
+  // Pre-select all ollama models for compare mode
+  if (cmpSelectedModels.value.size === 0 && ollamaLlmModels.value.length > 0) {
+    cmpSelectedModels.value = new Set(ollamaLlmModels.value.map(m => m.id))
+  }
+}
+
+function startCompare() {
+  if (!cmpPrompt.value.trim() || cmpSelectedModels.value.size === 0) return
+  cmpRunning.value = true
+  cmpResults.value = []
+  cmpLog.value = []
+
+  const params = new URLSearchParams({
+    prompt:    cmpPrompt.value,
+    model_ids: [...cmpSelectedModels.value].join(','),
+  })
+
+  const es = new EventSource(`/api/imitate/run?${params}`)
+  cmpEventSource.value = es
+
+  es.onmessage = (event: MessageEvent) => {
+    try {
+      const msg = JSON.parse(event.data)
+      if (msg.type === 'start') {
+        cmpLog.value.push(`Comparing ${msg.total_models} models…`)
+      } else if (msg.type === 'model_start') {
+        cmpLog.value.push(`→ ${msg.model}…`)
+      } else if (msg.type === 'model_done') {
+        const status = msg.error
+          ? `✕ ${msg.error}`
+          : `✓ ${(msg.elapsed_ms / 1000).toFixed(1)}s`
+        cmpLog.value.push(`  ${msg.model}: ${status}`)
+        cmpResults.value.push({
+          model:      msg.model,
+          response:   msg.response,
+          elapsed_ms: msg.elapsed_ms,
+          error:      msg.error ?? null,
+        })
+      } else if (msg.type === 'complete') {
+        cmpRunning.value = false
+        es.close()
+      }
+    } catch { /* ignore malformed frames */ }
+  }
+
+  es.onerror = () => {
+    cmpLog.value.push('Connection error.')
+    cmpRunning.value = false
+    es.close()
+  }
+}
+
+function cancelCompare() {
+  cmpEventSource.value?.close()
+  cmpEventSource.value = null
+  cmpRunning.value = false
+  cmpLog.value.push('Cancelled.')
+}
 
 async function cancelBenchmark() {
   await fetch('/api/benchmark/cancel', { method: 'POST' }).catch(() => {})
@@ -1603,4 +1827,99 @@ details[open] .ft-summary::before { content: '▼  '; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* ── Compare mode ─────────────────────────────────────────────────────────── */
+
+.prompt-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #6b7a99);
+  margin-top: 0.5rem;
+}
+
+.cmp-prompt-editor {
+  width: 100%;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85rem;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.375rem;
+  background: var(--color-surface, #f0f4fc);
+  color: var(--color-text, #1a2338);
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.cmp-prompt-editor:focus {
+  outline: 2px solid var(--app-primary, #2A6080);
+  outline-offset: -1px;
+}
+
+.cmp-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.cmp-result-card {
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: var(--color-surface, #f0f4fc);
+  display: flex;
+  flex-direction: column;
+}
+
+.cmp-result-card.cmp-error {
+  border-color: #fca5a5;
+}
+
+.cmp-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface-raised, #e4ebf5);
+  border-bottom: 1px solid var(--color-border, #d0d7e8);
+}
+
+.cmp-model-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text, #1a2338);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmp-meta {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7a99);
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}
+
+.err-badge {
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 9999px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.cmp-response, .cmp-error-text {
+  padding: 0.75rem;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0;
+  flex: 1;
+  color: var(--color-text, #1a2338);
+}
+
+.cmp-error-text { color: #b91c1c; }
 </style>

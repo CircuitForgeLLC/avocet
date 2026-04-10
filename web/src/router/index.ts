@@ -8,6 +8,7 @@ const BenchmarkView = () => import('../views/BenchmarkView.vue')
 const SettingsView    = () => import('../views/SettingsView.vue')
 const CorrectionsView = () => import('../views/CorrectionsView.vue')
 const ModelsView      = () => import('../views/ModelsView.vue')
+const ImitateView     = () => import('../views/ImitateView.vue')
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -17,6 +18,7 @@ export const router = createRouter({
     { path: '/stats',       component: StatsView,       meta: { title: 'Stats' } },
     { path: '/benchmark',   component: BenchmarkView,   meta: { title: 'Benchmark' } },
     { path: '/models',      component: ModelsView,      meta: { title: 'Models' } },
+    { path: '/imitate',     component: ImitateView,     meta: { title: 'Imitate' }     },
     { path: '/corrections', component: CorrectionsView, meta: { title: 'Corrections' } },
     { path: '/settings',    component: SettingsView,    meta: { title: 'Settings' } },
   ],
