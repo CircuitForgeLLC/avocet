@@ -46,3 +46,46 @@ cforch:
   # license_key:     CFG-AVCT-xxxx-xxxx-xxxx
   # ollama_url:      http://localhost:11434
   # ollama_model:    llama3.2:3b
+
+# Imitate tab — pull real samples from sibling CF product APIs and run them
+# through local LLMs to build a corrections dataset.
+# ollama_url defaults to cforch.ollama_url if omitted here.
+imitate:
+  ollama_url: http://localhost:11434   # optional — falls back to cforch.ollama_url
+
+  products:
+    - id: peregrine
+      name: Peregrine
+      icon: "🦅"
+      description: Job search assistant
+      base_url: http://localhost:8502
+      sample_endpoint: /api/jobs
+      text_fields: [title, description]
+      prompt_template: "Analyze this job listing and identify key requirements:\n\n{text}"
+
+    - id: kiwi
+      name: Kiwi
+      icon: "🥝"
+      description: Pantry tracker
+      base_url: http://localhost:8511
+      sample_endpoint: /api/inventory
+      text_fields: [name, category, notes]
+      prompt_template: "Describe this pantry item and estimate how best to use it:\n\n{text}"
+
+    - id: snipe
+      name: Snipe
+      icon: "🎯"
+      description: eBay trust scoring
+      base_url: http://localhost:8509
+      sample_endpoint: /api/listings
+      text_fields: [title, description, seller_info]
+      prompt_template: "Evaluate the trustworthiness of this listing and flag any red flags:\n\n{text}"
+
+    - id: osprey
+      name: Osprey
+      icon: "📞"
+      description: Gov't hold-line automation
+      base_url: http://localhost:8520
+      sample_endpoint: /api/calls/recent
+      text_fields: [agency, issue, notes]
+      prompt_template: "Draft a concise summary of this government call record:\n\n{text}"
