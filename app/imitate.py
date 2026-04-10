@@ -94,10 +94,10 @@ def _http_get_json(url: str, timeout: int = 5) -> Any:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _is_online(base_url: str) -> bool:
-    """Return True if the product's /api/health endpoint responds OK."""
+def _is_online(base_url: str, health_path: str = "/api/health") -> bool:
+    """Return True if the product's health endpoint responds OK."""
     try:
-        data = _http_get_json(f"{base_url.rstrip('/')}/api/health", timeout=2)
+        data = _http_get_json(f"{base_url.rstrip('/')}{health_path}", timeout=2)
         return bool(data)
     except Exception:
         return False
@@ -114,7 +114,8 @@ def _extract_sample(
         item = raw[min(sample_index, len(raw) - 1)]
     elif isinstance(raw, dict):
         # may be {items: [...]} or the item itself
-        for key in ("items", "results", "data", "jobs", "listings", "pantry"):
+        for key in ("items", "results", "data", "jobs", "listings", "pantry",
+                    "saved_searches", "entries", "calls", "records"):
             if key in raw and isinstance(raw[key], list):
                 lst = raw[key]
                 item = lst[min(sample_index, len(lst) - 1)] if lst else {}
@@ -189,7 +190,7 @@ def get_products() -> dict:
             "icon":        p.get("icon", "📦"),
             "description": p.get("description", ""),
             "base_url":    base_url,
-            "online":      _is_online(base_url) if base_url else False,
+            "online":      _is_online(base_url, p.get("health_path", "/api/health")) if base_url else False,
         })
     return {"products": products}
 
