@@ -82,8 +82,11 @@ def test_tasks_parses_yaml(client, config_dir, tmp_path):
     assert r.status_code == 200
     data = r.json()
     assert len(data["tasks"]) == 2
-    assert data["tasks"][0] == {"id": "t1", "name": "Task One", "type": "instruction"}
-    assert data["tasks"][1] == {"id": "t2", "name": "Task Two", "type": "reasoning"}
+    # TaskEntry now includes optional prompt/system fields (default "")
+    t1 = data["tasks"][0]
+    assert t1["id"] == "t1" and t1["name"] == "Task One" and t1["type"] == "instruction"
+    t2 = data["tasks"][1]
+    assert t2["id"] == "t2" and t2["name"] == "Task Two" and t2["type"] == "reasoning"
     assert "instruction" in data["types"]
     assert "reasoning" in data["types"]
 
