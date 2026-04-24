@@ -155,6 +155,9 @@ app.include_router(cforch_router, prefix="/api/cforch")
 from app.imitate import router as imitate_router
 app.include_router(imitate_router, prefix="/api/imitate")
 
+from app.style import router as style_router
+app.include_router(style_router, prefix="/api/style")
+
 # In-memory last-action store (single user, local tool — in-memory is fine)
 _last_action: dict | None = None
 

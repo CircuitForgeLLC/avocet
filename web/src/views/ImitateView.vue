@@ -49,11 +49,29 @@
       <div v-if="sampleLoading" class="picker-loading">Fetching sample from API…</div>
 
       <template v-else-if="rawSample">
-        <!-- Fetched text preview -->
-        <details class="sample-preview" open>
+        <!-- Listing image thumbnail (Snipe vision samples) -->
+        <div v-if="imageUrl" class="sample-image-row">
+          <img :src="imageUrl" class="sample-image-thumb" alt="Listing photo" @error="imageUrl = ''" />
+          <span class="image-badge">📷 image will be sent to vision models</span>
+        </div>
+
+        <!-- Fetched text preview (hidden when prompt_template is {input_text} with no text_fields) -->
+        <details v-if="rawSample.text" class="sample-preview" open>
           <summary class="sample-preview-toggle">Raw sample text</summary>
           <pre class="sample-text">{{ rawSample.text }}</pre>
         </details>
+
+        <!-- System context (shown only when the product provides one) -->
+        <template v-if="systemPrompt">
+          <details class="sample-preview">
+            <summary class="sample-preview-toggle">System context <span class="system-badge">sent separately to model</span></summary>
+            <textarea
+              class="prompt-editor system-editor"
+              v-model="systemPrompt"
+              rows="4"
+            />
+          </details>
+        </template>
 
         <!-- Prompt editor -->
         <label class="prompt-label" for="prompt-editor">Prompt sent to models</label>
@@ -112,6 +130,42 @@
         </div>
       </details>
 
+      <!-- cf-text model picker (live catalog from cf-orch) -->
+      <details class="model-picker">
+        <summary class="picker-summary">
+          <span class="picker-title">⚡ cf-text Models <span class="cforch-badge">via cf-orch</span></span>
+          <span class="picker-badge">{{ selectedCfTextModels.size }} / {{ cfTextCatalog.length }}</span>
+        </summary>
+        <div class="picker-body">
+          <div v-if="catalogLoading" class="picker-loading">Loading catalog from cf-orch…</div>
+          <div v-else-if="cfTextCatalog.length === 0" class="picker-empty">
+            No cf-text models available — check cf-orch coordinator is running.
+          </div>
+          <template v-else>
+            <label class="picker-cat-header">
+              <input
+                type="checkbox"
+                :checked="selectedCfTextModels.size === cfTextCatalog.length"
+                :indeterminate="selectedCfTextModels.size > 0 && selectedCfTextModels.size < cfTextCatalog.length"
+                @change="toggleAllCfText(($event.target as HTMLInputElement).checked)"
+              />
+              <span class="picker-cat-name">All cf-text models</span>
+            </label>
+            <div class="picker-model-list">
+              <label v-for="m in cfTextCatalog" :key="m.id" class="picker-model-row">
+                <input
+                  type="checkbox"
+                  :checked="selectedCfTextModels.has(m.id)"
+                  @change="toggleCfText(m.id, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="picker-model-name" :title="m.description || m.id">{{ m.id }}</span>
+                <span v-if="m.vram_mb" class="tag">{{ Math.round(m.vram_mb / 1024 * 10) / 10 }}GB</span>
+              </label>
+            </div>
+          </template>
+        </div>
+      </details>
+
       <!-- Temperature -->
       <div class="temp-row">
         <label for="temp-slider" class="temp-label">Temperature: <strong>{{ temperature.toFixed(1) }}</strong></label>
@@ -128,7 +182,7 @@
       <div class="run-row">
         <button
           class="btn-run"
-          :disabled="running || selectedModels.size === 0"
+          :disabled="running || (selectedModels.size === 0 && selectedCfTextModels.size === 0)"
           @click="startRun"
         >
           {{ running ? '⏳ Running…' : '▶ Run' }}
@@ -204,6 +258,8 @@ interface Sample {
   sample_index: number
   text: string
   prompt: string
+  system_prompt: string
+  image_url: string
   raw_item: Record<string, unknown>
 }
 
@@ -213,6 +269,12 @@ interface ModelEntry {
   service: string
   tags: string[]
   vram_estimate_mb: number
+}
+
+interface CatalogEntry {
+  id: string
+  vram_mb: number
+  description: string
 }
 
 interface RunResult {
@@ -232,10 +294,16 @@ const sampleLoading    = ref(false)
 const sampleError      = ref<string | null>(null)
 const rawSample        = ref<Sample | null>(null)
 const editedPrompt     = ref('')
+const systemPrompt     = ref('')
+const imageUrl         = ref('')
 
 const modelsLoading    = ref(false)
 const allModels        = ref<ModelEntry[]>([])
 const selectedModels   = ref<Set<string>>(new Set())
+
+const catalogLoading        = ref(false)
+const cfTextCatalog         = ref<CatalogEntry[]>([])
+const selectedCfTextModels  = ref<Set<string>>(new Set())
 
 const temperature      = ref(0.7)
 
@@ -261,7 +329,7 @@ const successfulResults = computed(() =>
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  await Promise.all([loadProducts(), loadModels()])
+  await Promise.all([loadProducts(), loadModels(), loadCfTextCatalog()])
 })
 
 // ── Methods ────────────────────────────────────────────────────────────────────
@@ -298,10 +366,38 @@ async function loadModels() {
   }
 }
 
+async function loadCfTextCatalog() {
+  catalogLoading.value = true
+  try {
+    const resp = await fetch('/api/imitate/catalog')
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const data = await resp.json()
+    cfTextCatalog.value = data.models ?? []
+  } catch {
+    cfTextCatalog.value = []
+  } finally {
+    catalogLoading.value = false
+  }
+}
+
+function toggleCfText(id: string, checked: boolean) {
+  const next = new Set(selectedCfTextModels.value)
+  checked ? next.add(id) : next.delete(id)
+  selectedCfTextModels.value = next
+}
+
+function toggleAllCfText(checked: boolean) {
+  selectedCfTextModels.value = checked
+    ? new Set(cfTextCatalog.value.map(m => m.id))
+    : new Set()
+}
+
 async function selectProduct(p: Product) {
   selectedProduct.value = p
   rawSample.value = null
   editedPrompt.value = ''
+  systemPrompt.value = ''
+  imageUrl.value = ''
   sampleError.value = null
   results.value = []
   runLog.value = []
@@ -321,6 +417,8 @@ async function fetchSample() {
     const data: Sample = await resp.json()
     rawSample.value = data
     editedPrompt.value = data.prompt
+    systemPrompt.value = data.system_prompt ?? ''
+    imageUrl.value = data.image_url ?? ''
   } catch (err: unknown) {
     sampleError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -341,7 +439,8 @@ function toggleAllModels(checked: boolean) {
 }
 
 function startRun() {
-  if (running.value || !editedPrompt.value.trim() || selectedModels.value.size === 0) return
+  const hasModels = selectedModels.value.size > 0 || selectedCfTextModels.value.size > 0
+  if (running.value || !editedPrompt.value.trim() || !hasModels) return
 
   running.value = true
   results.value = []
@@ -349,10 +448,13 @@ function startRun() {
   correctionsPushMsg.value = null
 
   const params = new URLSearchParams({
-    prompt:     editedPrompt.value,
-    model_ids:  [...selectedModels.value].join(','),
-    temperature: temperature.value.toString(),
-    product_id: selectedProduct.value?.id ?? '',
+    prompt:             editedPrompt.value,
+    model_ids:          [...selectedModels.value].join(','),
+    cf_text_model_ids:  [...selectedCfTextModels.value].join(','),
+    temperature:        temperature.value.toString(),
+    product_id:         selectedProduct.value?.id ?? '',
+    system:             systemPrompt.value,
+    image_url:          imageUrl.value,
   })
 
   const es = new EventSource(`/api/imitate/run?${params}`)
@@ -362,9 +464,13 @@ function startRun() {
     try {
       const msg = JSON.parse(event.data)
       if (msg.type === 'start') {
-        runLog.value.push(`Running ${msg.total_models} model(s)…`)
+        const imgNote = msg.has_image ? ' (with image)' : ''
+        runLog.value.push(`Running ${msg.total_models} model(s)${imgNote}…`)
       } else if (msg.type === 'model_start') {
-        runLog.value.push(`→ ${msg.model}…`)
+        const svc = msg.service === 'cf-text' ? ' [cf-text]' : ''
+        runLog.value.push(`→ ${msg.model}${svc}…`)
+      } else if (msg.type === 'model_coldstart') {
+        runLog.value.push(`  ⏳ ${msg.model}: cold start — waiting for service to load…`)
       } else if (msg.type === 'model_done') {
         const status = msg.error
           ? `✕ error: ${msg.error}`
@@ -584,6 +690,46 @@ async function pushCorrections() {
   background: var(--color-bg, #f0f4fc);
   margin: 0;
   color: var(--color-text, #1a2338);
+}
+
+.sample-image-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sample-image-thumb {
+  width: 120px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  flex-shrink: 0;
+}
+
+.image-badge {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary, #6b7a99);
+}
+
+.system-badge {
+  font-size: 0.68rem;
+  background: color-mix(in srgb, var(--app-primary, #2A6080) 15%, transparent);
+  color: var(--app-primary, #2A6080);
+  border-radius: 9999px;
+  padding: 0.1rem 0.5rem;
+  margin-left: 0.4rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.system-editor {
+  border-top: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
 }
 
 .prompt-label {
@@ -895,4 +1041,15 @@ async function pushCorrections() {
 
 .msg-ok { color: #065f46; }
 .msg-err { color: #b91c1c; }
+
+.cforch-badge {
+  font-size: 0.68rem;
+  background: color-mix(in srgb, var(--app-accent, #059669) 18%, transparent);
+  color: var(--app-accent, #059669);
+  border-radius: 9999px;
+  padding: 0.1rem 0.5rem;
+  margin-left: 0.4rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
 </style>
