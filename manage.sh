@@ -90,6 +90,12 @@ usage() {
     echo -e "    ${GREEN}score [args]${NC}             Shortcut: --score [args]"
     echo -e "    ${GREEN}compare [args]${NC}           Shortcut: --compare [args]"
     echo ""
+    echo "  Writing Style Benchmark:"
+    echo -e "    ${GREEN}style-bench [args]${NC}       Run benchmark_style.py (args passed through)"
+    echo -e "    ${GREEN}style-list${NC}               List available ollama models for style bench"
+    echo -e "    ${GREEN}style-run [args]${NC}         Run writing style benchmark (--models, --samples, --include-large, --scan-disk PATH, --cforch)"
+    echo -e "    ${GREEN}style-last${NC}               Print most recent writing style benchmark report"
+    echo ""
     echo "  Dev:"
     echo -e "    ${GREEN}dev${NC}                      Hot-reload: uvicorn --reload (:8503) + Vite HMR (:5173)"
     echo -e "    ${GREEN}test${NC}                     Run pytest suite"
@@ -247,6 +253,26 @@ case "$CMD" in
 
     compare)
         exec "$0" benchmark --compare "$@"
+        ;;
+
+    style-bench)
+        info "Running writing style benchmark (${ENV_BM})…"
+        if [[ ! -x "$PYTHON_BM" ]]; then
+            error "Python not found in ${ENV_BM} env at ${PYTHON_BM}"
+        fi
+        "$PYTHON_BM" scripts/benchmark_style.py "$@"
+        ;;
+
+    style-list)
+        exec "$0" style-bench --list-models
+        ;;
+
+    style-run)
+        exec "$0" style-bench --run "$@"
+        ;;
+
+    style-last)
+        exec "$0" style-bench --show-last
         ;;
 
     help|--help|-h)

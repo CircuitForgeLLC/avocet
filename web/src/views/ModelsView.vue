@@ -42,6 +42,12 @@
           <span v-if="lookupResult.pipeline_tag" class="chip chip-pipeline">
             {{ lookupResult.pipeline_tag }}
           </span>
+          <span v-if="lookupResult.role" class="chip chip-role">
+            {{ lookupResult.role }}
+          </span>
+          <span v-if="lookupResult.service" class="chip" :class="serviceChipClass(lookupResult.service)">
+            {{ lookupResult.service }}
+          </span>
           <span v-if="lookupResult.adapter_recommendation" class="chip chip-adapter">
             {{ lookupResult.adapter_recommendation }}
           </span>
@@ -61,11 +67,10 @@
 
         <button
           class="btn-primary btn-add-queue"
-          :class="{ 'btn-add-queue-warn': !lookupResult.compatible }"
           :disabled="lookupResult.already_installed || lookupResult.already_queued || addingToQueue"
           @click="addToQueue"
         >
-          {{ addingToQueue ? 'Adding…' : lookupResult.compatible ? 'Add to queue' : 'Add anyway' }}
+          {{ addingToQueue ? 'Adding…' : 'Add to queue' }}
         </button>
       </div>
     </section>
@@ -90,7 +95,9 @@
           </button>
         </div>
         <div class="model-meta">
-          <span v-if="model.pipeline_tag"         class="chip chip-pipeline">{{ model.pipeline_tag }}</span>
+          <span v-if="model.pipeline_tag"          class="chip chip-pipeline">{{ model.pipeline_tag }}</span>
+          <span v-if="model.role"                  class="chip chip-role">{{ model.role }}</span>
+          <span v-if="model.service"               class="chip" :class="serviceChipClass(model.service)">{{ model.service }}</span>
           <span v-if="model.adapter_recommendation" class="chip chip-adapter">{{ model.adapter_recommendation }}</span>
         </div>
         <div class="model-card-actions">
@@ -116,6 +123,8 @@
         </div>
         <div class="model-meta">
           <span v-if="model.pipeline_tag" class="chip chip-pipeline">{{ model.pipeline_tag }}</span>
+          <span v-if="model.role"         class="chip chip-role">{{ model.role }}</span>
+          <span v-if="model.service"      class="chip" :class="serviceChipClass(model.service)">{{ model.service }}</span>
         </div>
 
         <div v-if="downloadErrors[model.id]" class="download-error" role="alert">
@@ -124,14 +133,19 @@
         <div v-else class="progress-wrap" :aria-label="`Download progress for ${model.repo_id}`">
           <div
             class="progress-bar"
-            :style="{ width: `${downloadProgress[model.id] ?? 0}%` }"
+            :style="{ width: `${downloadProgress[model.repo_id]?.pct ?? 0}%` }"
             role="progressbar"
-            :aria-valuenow="downloadProgress[model.id] ?? 0"
+            :aria-valuenow="downloadProgress[model.repo_id]?.pct ?? 0"
             aria-valuemin="0"
             aria-valuemax="100"
           />
           <span class="progress-label">
-            {{ downloadProgress[model.id] == null ? 'Preparing…' : `${downloadProgress[model.id]}%` }}
+            {{
+              !downloadProgress[model.repo_id] ? 'Preparing…'
+              : downloadProgress[model.repo_id].pct != null ? `${Math.round(downloadProgress[model.repo_id].pct!)}%`
+              : downloadProgress[model.repo_id].bytes > 0 ? `${(downloadProgress[model.repo_id].bytes / 1024 / 1024).toFixed(0)} MB downloaded…`
+              : 'Preparing…'
+            }}
           </span>
         </div>
       </div>
@@ -145,42 +159,90 @@
         No models installed yet.
       </div>
 
-      <div v-else class="installed-table-wrap">
-        <table class="installed-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Type</th>
-              <th>Adapter</th>
-              <th>Size</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="model in installedModels" :key="model.name">
-              <td class="td-name">{{ model.name }}</td>
-              <td>
-                <span
-                  class="badge"
-                  :class="model.type === 'finetuned' ? 'badge-accent' : 'badge-info'"
-                >
-                  {{ model.type }}
-                </span>
-              </td>
-              <td>{{ model.adapter ?? '—' }}</td>
-              <td>{{ humanBytes(model.size) }}</td>
-              <td>
-                <button
-                  class="btn-danger btn-sm"
-                  @click="deleteInstalled(model.name)"
-                >
-                  Delete
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <template v-else>
+        <div
+          v-for="group in installedByService"
+          :key="group.service"
+          class="installed-group"
+        >
+          <div class="installed-group-header">
+            <span class="chip" :class="serviceChipClass(group.service)">
+              {{ serviceLabel(group.service) }}
+            </span>
+            <span class="installed-group-count">{{ group.models.length }} model{{ group.models.length !== 1 ? 's' : '' }}</span>
+          </div>
+
+          <div class="installed-table-wrap">
+            <table class="installed-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Role</th>
+                  <th>Size</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="model in group.models" :key="model.name">
+                  <td class="td-name">{{ model.model_id ?? model.name }}</td>
+                  <td>
+                    <span
+                      class="badge"
+                      :class="model.type === 'finetuned' ? 'badge-accent' : 'badge-info'"
+                    >
+                      {{ model.type }}
+                    </span>
+                  </td>
+                  <td>
+                    <span v-if="model.role" class="chip chip-role chip-sm">{{ model.role }}</span>
+                    <span v-else>—</span>
+                  </td>
+                  <td>{{ humanBytes(model.size_bytes) }}</td>
+                  <td class="td-actions">
+                    <div v-if="!model.service" class="classify-row">
+                      <select
+                        class="classify-select"
+                        :value="classifyDraft[model.name]?.service ?? ''"
+                        @change="onServiceChange(model.name, ($event.target as HTMLSelectElement).value)"
+                        aria-label="Assign service"
+                      >
+                        <option value="" disabled>Service…</option>
+                        <option v-for="svc in CLASSIFIABLE_SERVICES" :key="svc.value" :value="svc.value">{{ svc.label }}</option>
+                      </select>
+                      <select
+                        class="classify-select"
+                        :value="classifyDraft[model.name]?.role ?? ''"
+                        :disabled="!classifyDraft[model.name]?.service"
+                        @change="(e) => setClassifyRole(model.name, (e.target as HTMLSelectElement).value)"
+                        aria-label="Assign role"
+                      >
+                        <option value="" disabled>Role…</option>
+                        <option
+                          v-for="role in rolesForService(classifyDraft[model.name]?.service ?? '')"
+                          :key="role"
+                          :value="role"
+                        >{{ role }}</option>
+                      </select>
+                      <button
+                        class="btn-primary btn-sm"
+                        :disabled="!classifyDraft[model.name]?.service || !classifyDraft[model.name]?.role"
+                        @click="saveClassify(model.name)"
+                      >Save</button>
+                    </div>
+                    <button
+                      class="btn-danger btn-sm"
+                      @click="deleteInstalled(model.name)"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
     </section>
   </div>
 </template>
@@ -194,6 +256,8 @@ interface LookupResult {
   repo_id: string
   pipeline_tag: string | null
   adapter_recommendation: string | null
+  role: string | null
+  service: string | null
   compatible: boolean
   warning: string | null
   size: number | null
@@ -208,20 +272,27 @@ interface QueuedModel {
   status: 'pending' | 'downloading' | 'done' | 'error'
   pipeline_tag: string | null
   adapter_recommendation: string | null
+  role: string | null
+  service: string | null
 }
 
 interface InstalledModel {
   name: string
   type: 'finetuned' | 'downloaded'
   adapter: string | null
-  size: number
+  role: string | null
+  service: string | null
+  size_bytes: number
+  model_id: string | null
 }
 
 interface SseProgressEvent {
-  model_id: string
-  pct: number | null
-  status: 'progress' | 'done' | 'error'
-  message?: string
+  type: 'progress' | 'done' | 'error' | 'idle'
+  repo_id?: string
+  pct?: number
+  downloaded_bytes?: number
+  total_bytes?: number
+  error?: string
 }
 
 // ── State ─────────────────────────────────────────────
@@ -235,7 +306,8 @@ const addingToQueue = ref(false)
 const queuedModels    = ref<QueuedModel[]>([])
 const installedModels = ref<InstalledModel[]>([])
 
-const downloadProgress = ref<Record<string, number>>({})
+const downloadProgress  = ref<Record<string, { pct: number | null; bytes: number }>>({})
+const classifyDraft     = ref<Record<string, { service: string; role: string }>>({})
 const downloadErrors   = ref<Record<string, string>>({})
 
 let pollInterval: ReturnType<typeof setInterval> | null = null
@@ -251,7 +323,68 @@ const downloadingModels = computed(() =>
   queuedModels.value.filter(m => m.status === 'downloading')
 )
 
+const SERVICE_ORDER = ['avocet', 'cf-text', 'cf-stt', 'cf-tts', 'cf-vision', 'cf-image', 'cf-core', 'cf-voice', 'other']
+
+const CLASSIFIABLE_SERVICES = [
+  { value: 'avocet',    label: 'Avocet — Email Classifiers' },
+  { value: 'cf-text',   label: 'cf-text — Language Models' },
+  { value: 'cf-stt',    label: 'cf-stt — Speech Recognition' },
+  { value: 'cf-tts',    label: 'cf-tts — Text to Speech' },
+  { value: 'cf-vision', label: 'cf-vision — Vision / VLM' },
+  { value: 'cf-image',  label: 'cf-image — Image Generation' },
+  { value: 'cf-core',   label: 'cf-core — Embeddings' },
+  { value: 'cf-voice',  label: 'cf-voice — Audio Classification' },
+]
+
+const SERVICE_ROLES: Record<string, string[]> = {
+  'avocet':    ['classifier', 'reranker'],
+  'cf-text':   ['generator'],
+  'cf-stt':    ['stt', 'alm'],
+  'cf-tts':    ['tts'],
+  'cf-vision': ['vision', 'vlm', 'embedding'],
+  'cf-image':  ['image-gen'],
+  'cf-core':   ['embedding'],
+  'cf-voice':  ['classifier'],
+}
+
+function rolesForService(service: string): string[] {
+  return SERVICE_ROLES[service] ?? []
+}
+
+const installedByService = computed(() => {
+  const grouped: Record<string, InstalledModel[]> = {}
+  for (const model of installedModels.value) {
+    const key = model.service ?? 'other'
+    if (!grouped[key]) grouped[key] = []
+    grouped[key].push(model)
+  }
+  // Return ordered sections: known services first, then anything else
+  const keys = [...SERVICE_ORDER.filter(s => grouped[s]), ...Object.keys(grouped).filter(k => !SERVICE_ORDER.includes(k))]
+  return keys.map(key => ({ service: key, models: grouped[key] }))
+})
+
 // ── Helpers ───────────────────────────────────────────
+
+const SERVICE_LABELS: Record<string, string> = {
+  'avocet':    'Avocet — Email Classifiers',
+  'cf-text':   'cf-text — Language Models',
+  'cf-stt':    'cf-stt — Speech Recognition',
+  'cf-tts':    'cf-tts — Text to Speech',
+  'cf-vision': 'cf-vision — Vision / VLM',
+  'cf-image':  'cf-image — Image Generation',
+  'cf-core':   'cf-core — Embeddings',
+  'cf-voice':  'cf-voice — Audio Classification',
+  'other':     'Other — Unclassified',
+}
+
+function serviceLabel(service: string): string {
+  return SERVICE_LABELS[service] ?? service
+}
+
+function serviceChipClass(service: string | null): string {
+  if (!service) return 'chip-service-other'
+  return `chip-service-${service.replace(/[^a-z0-9]/g, '-')}`
+}
 
 function humanBytes(bytes: number | null): string {
   if (bytes == null) return '—'
@@ -305,10 +438,11 @@ async function addToQueue() {
   if (!lookupResult.value) return
   addingToQueue.value = true
   try {
+    const { repo_id, pipeline_tag, adapter_recommendation, role, service } = lookupResult.value
     const res = await fetch('/api/models/queue', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repo_id: lookupResult.value.repo_id }),
+      body: JSON.stringify({ repo_id, pipeline_tag, adapter_recommendation, role, service }),
     })
     if (res.ok) {
       lookupResult.value = { ...lookupResult.value, already_queued: true }
@@ -339,12 +473,50 @@ async function dismissModel(id: string) {
   } catch { /* ignore */ }
 }
 
+function onServiceChange(name: string, service: string) {
+  const roles = SERVICE_ROLES[service] ?? []
+  classifyDraft.value = {
+    ...classifyDraft.value,
+    [name]: { service, role: roles.length === 1 ? roles[0] : '' },
+  }
+}
+
+function setClassifyRole(name: string, role: string) {
+  classifyDraft.value = {
+    ...classifyDraft.value,
+    [name]: { ...classifyDraft.value[name], role },
+  }
+}
+
+async function saveClassify(name: string) {
+  const draft = classifyDraft.value[name]
+  if (!draft?.service || !draft?.role) return
+  try {
+    const res = await fetch(`/api/models/installed/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service: draft.service, role: draft.role }),
+    })
+    if (res.ok) {
+      // Update in-place so the model moves to the correct service group
+      installedModels.value = installedModels.value.map(m =>
+        m.name === name ? { ...m, service: draft.service, role: draft.role } : m
+      )
+      const updated = { ...classifyDraft.value }
+      delete updated[name]
+      classifyDraft.value = updated
+      await loadQueue()
+    }
+  } catch { /* non-fatal */ }
+}
+
 async function deleteInstalled(name: string) {
   if (!window.confirm(`Delete installed model "${name}"? This cannot be undone.`)) return
   try {
     const res = await fetch(`/api/models/installed/${encodeURIComponent(name)}`, { method: 'DELETE' })
     if (res.ok) {
       installedModels.value = installedModels.value.filter(m => m.name !== name)
+      await loadQueue()
     }
   } catch { /* ignore */ }
 }
@@ -378,21 +550,28 @@ function startSse() {
       return
     }
 
-    const { model_id, pct, status, message } = event
+    const { type, repo_id, pct, downloaded_bytes, error } = event
+    if (!repo_id) return
 
-    if (status === 'progress' && pct != null) {
-      downloadProgress.value = { ...downloadProgress.value, [model_id]: pct }
-    } else if (status === 'done') {
+    if (type === 'progress') {
+      const bytes = downloaded_bytes ?? 0
+      // pct stays null when total_bytes is unknown so we can show "X MB" instead
+      const progress = (pct != null && pct > 0) ? pct : (bytes > 0 ? null : undefined)
+      downloadProgress.value = { ...downloadProgress.value, [repo_id]: { pct: progress ?? null, bytes } }
+    } else if (type === 'done') {
       const updated = { ...downloadProgress.value }
-      delete updated[model_id]
+      delete updated[repo_id]
       downloadProgress.value = updated
 
-      queuedModels.value = queuedModels.value.filter(m => m.id !== model_id)
+      queuedModels.value = queuedModels.value.filter(m => m.repo_id !== repo_id)
       loadInstalled()
-    } else if (status === 'error') {
-      downloadErrors.value = {
-        ...downloadErrors.value,
-        [model_id]: message ?? 'Download failed.',
+    } else if (type === 'error') {
+      const entry = queuedModels.value.find(m => m.repo_id === repo_id)
+      if (entry) {
+        downloadErrors.value = {
+          ...downloadErrors.value,
+          [entry.id]: error ?? 'Download failed.',
+        }
       }
     }
   })
@@ -595,12 +774,6 @@ onUnmounted(() => {
   align-self: flex-start;
 }
 
-.btn-add-queue-warn {
-  background: var(--color-surface-raised, #e4ebf5);
-  color: var(--color-text-secondary, #6b7a99);
-  border: 1px solid var(--color-border, #d0d7e8);
-}
-
 /* ── Model cards (queue + downloads) ── */
 .model-card {
   border: 1px solid var(--color-border, #a8b8d0);
@@ -715,6 +888,35 @@ onUnmounted(() => {
   word-break: break-all;
 }
 
+.td-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+.classify-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.classify-select {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #444);
+  background: var(--color-surface, #1e1e2e);
+  color: var(--color-text, #cdd6f4);
+  cursor: pointer;
+}
+
+.classify-select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ── Badges ── */
 .badge-group {
   display: flex;
@@ -775,6 +977,76 @@ onUnmounted(() => {
 .chip-adapter {
   color: var(--color-accent, #c4732a);
   background: color-mix(in srgb, var(--color-accent, #c4732a) 12%, var(--color-surface-alt, #dde4f0));
+}
+
+.chip-role {
+  color: var(--color-info, #1e6091);
+  background: color-mix(in srgb, var(--color-info, #1e6091) 12%, var(--color-surface-alt, #dde4f0));
+}
+
+.chip-sm {
+  font-size: 0.68rem;
+  padding: 0.1rem 0.4rem;
+}
+
+/* Service chips — one colour per CF service */
+.chip-service-avocet {
+  color: var(--color-primary, #2d5a27);
+  background: color-mix(in srgb, var(--color-primary, #2d5a27) 15%, var(--color-surface-alt, #dde4f0));
+}
+
+.chip-service-cf-text {
+  color: #c2410c;
+  background: color-mix(in srgb, #c2410c 12%, var(--color-surface-alt, #dde4f0));
+}
+
+.chip-service-cf-stt {
+  color: #5e35b1;
+  background: color-mix(in srgb, #5e35b1 12%, var(--color-surface-alt, #dde4f0));
+}
+
+.chip-service-cf-tts {
+  color: #0277bd;
+  background: color-mix(in srgb, #0277bd 12%, var(--color-surface-alt, #dde4f0));
+}
+
+.chip-service-cf-vision {
+  color: #00695c;
+  background: color-mix(in srgb, #00695c 12%, var(--color-surface-alt, #dde4f0));
+}
+
+.chip-service-cf-core {
+  color: #6d4c41;
+  background: color-mix(in srgb, #6d4c41 12%, var(--color-surface-alt, #dde4f0));
+}
+
+.chip-service-cf-voice {
+  color: #ad1457;
+  background: color-mix(in srgb, #ad1457 12%, var(--color-surface-alt, #dde4f0));
+}
+
+.chip-service-other {
+  color: var(--color-text-muted, #4a5c7a);
+  background: var(--color-surface-alt, #dde4f0);
+}
+
+/* ── Installed group ── */
+.installed-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.installed-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.installed-group-count {
+  font-size: 0.78rem;
+  color: var(--color-text-muted, #4a5c7a);
 }
 
 /* ── Buttons ── */
@@ -852,7 +1124,7 @@ onUnmounted(() => {
 
   .installed-table th:nth-child(3),
   .installed-table td:nth-child(3) {
-    display: none;  /* hide Adapter column on very narrow screens */
+    display: none;  /* hide Role column on very narrow screens */
   }
 }
 </style>

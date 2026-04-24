@@ -122,17 +122,88 @@ def test_lookup_returns_correct_shape(client):
     assert data["already_queued"] is False
 
 
-def test_lookup_unknown_pipeline_tag_returns_null_adapter(client):
-    """An unrecognised pipeline_tag yields adapter_recommendation=null."""
+def test_lookup_unknown_pipeline_tag_returns_null_adapter_and_incompatible(client):
+    """An unrecognised pipeline_tag yields adapter_recommendation=null and compatible=False."""
     mock_resp = MagicMock()
     mock_resp.status_code = 200
-    mock_resp.json.return_value = _make_hf_response("org/m", "audio-classification")
+    mock_resp.json.return_value = _make_hf_response("org/m", "reinforcement-learning")
 
     with patch("app.models.httpx.get", return_value=mock_resp):
         r = client.get("/api/models/lookup", params={"repo_id": "org/m"})
 
     assert r.status_code == 200
-    assert r.json()["adapter_recommendation"] is None
+    data = r.json()
+    assert data["adapter_recommendation"] is None
+    assert data["compatible"] is False
+    assert data["role"] is None
+    assert data["service"] is None
+    assert "CircuitForge model ecosystem" in data["warning"]
+
+
+def test_lookup_stt_tag_returns_compatible_with_cf_stt_service(client):
+    """automatic-speech-recognition tag yields compatible=True, service=cf-stt."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _make_hf_response("openai/whisper-base", "automatic-speech-recognition")
+
+    with patch("app.models.httpx.get", return_value=mock_resp):
+        r = client.get("/api/models/lookup", params={"repo_id": "openai/whisper-base"})
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["compatible"] is True
+    assert data["adapter_recommendation"] is None
+    assert data["role"] == "stt"
+    assert data["service"] == "cf-stt"
+    assert data["warning"] is None
+
+
+def test_lookup_vision_tag_returns_compatible_with_cf_vision_service(client):
+    """image-classification tag yields compatible=True, service=cf-vision."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _make_hf_response("google/siglip-base", "image-classification")
+
+    with patch("app.models.httpx.get", return_value=mock_resp):
+        r = client.get("/api/models/lookup", params={"repo_id": "google/siglip-base"})
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["compatible"] is True
+    assert data["role"] == "vision"
+    assert data["service"] == "cf-vision"
+
+
+def test_lookup_audio_classification_tag_returns_cf_voice_service(client):
+    """audio-classification tag yields compatible=True, service=cf-voice."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _make_hf_response("org/audio-model", "audio-classification")
+
+    with patch("app.models.httpx.get", return_value=mock_resp):
+        r = client.get("/api/models/lookup", params={"repo_id": "org/audio-model"})
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["compatible"] is True
+    assert data["role"] == "classifier"
+    assert data["service"] == "cf-voice"
+
+
+def test_lookup_embedding_tag_returns_compatible_with_cf_core_service(client):
+    """feature-extraction tag yields compatible=True, service=cf-core."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _make_hf_response("BAAI/bge-small-en", "feature-extraction")
+
+    with patch("app.models.httpx.get", return_value=mock_resp):
+        r = client.get("/api/models/lookup", params={"repo_id": "BAAI/bge-small-en"})
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["compatible"] is True
+    assert data["role"] == "embedding"
+    assert data["service"] == "cf-core"
 
 
 def test_lookup_already_queued_flag(client):
@@ -179,6 +250,26 @@ def test_queue_add_returns_entry_fields(client):
     assert entry["status"] == "pending"
     assert entry["pipeline_tag"] == "text-classification"
     assert entry["adapter_recommendation"] == "ZeroShotAdapter"
+
+
+def test_queue_preserves_role_and_service(client):
+    """POST /queue with role/service fields round-trips them through GET /queue."""
+    r = client.post("/api/models/queue", json={
+        "repo_id": "openai/whisper-base",
+        "pipeline_tag": "automatic-speech-recognition",
+        "adapter_recommendation": None,
+        "role": "stt",
+        "service": "cf-stt",
+    })
+    assert r.status_code == 201
+    entry = r.json()
+    assert entry["role"] == "stt"
+    assert entry["service"] == "cf-stt"
+
+    r2 = client.get("/api/models/queue")
+    items = r2.json()
+    assert items[0]["role"] == "stt"
+    assert items[0]["service"] == "cf-stt"
 
 
 # ── POST /queue — 409 duplicate ────────────────────────────────────────────────
@@ -317,7 +408,12 @@ def test_installed_detects_downloaded_model(client, tmp_path):
     model_dir.mkdir()
     (model_dir / "config.json").write_text(json.dumps({"model_type": "bert"}), encoding="utf-8")
     (model_dir / "model_info.json").write_text(
-        json.dumps({"repo_id": "org/mymodel", "adapter_recommendation": "ZeroShotAdapter"}),
+        json.dumps({
+            "repo_id": "org/mymodel",
+            "adapter_recommendation": "ZeroShotAdapter",
+            "role": "classifier",
+            "service": "avocet",
+        }),
         encoding="utf-8",
     )
 
@@ -329,6 +425,51 @@ def test_installed_detects_downloaded_model(client, tmp_path):
     assert items[0]["name"] == "org--mymodel"
     assert items[0]["adapter"] == "ZeroShotAdapter"
     assert items[0]["model_id"] == "org/mymodel"
+    assert items[0]["role"] == "classifier"
+    assert items[0]["service"] == "avocet"
+
+
+def test_installed_stt_model_surfaces_role_and_service(client):
+    """A downloaded STT model's role/service are returned by GET /installed."""
+    from app import models as models_module
+
+    model_dir = models_module._MODELS_DIR / "openai--whisper-base"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text(json.dumps({"model_type": "whisper"}), encoding="utf-8")
+    (model_dir / "model_info.json").write_text(
+        json.dumps({
+            "repo_id": "openai/whisper-base",
+            "adapter_recommendation": None,
+            "role": "stt",
+            "service": "cf-stt",
+        }),
+        encoding="utf-8",
+    )
+
+    r = client.get("/api/models/installed")
+    assert r.status_code == 200
+    items = r.json()
+    assert items[0]["role"] == "stt"
+    assert items[0]["service"] == "cf-stt"
+    assert items[0]["adapter"] is None
+
+
+def test_installed_finetuned_model_defaults_to_avocet_service(client):
+    """Fine-tuned models with no role/service in training_info default to avocet/classifier."""
+    from app import models as models_module
+
+    model_dir = models_module._MODELS_DIR / "my-finetuned-v2"
+    model_dir.mkdir()
+    (model_dir / "training_info.json").write_text(
+        json.dumps({"base_model": "microsoft/deberta-v3-base", "epochs": 3}),
+        encoding="utf-8",
+    )
+
+    r = client.get("/api/models/installed")
+    assert r.status_code == 200
+    items = r.json()
+    assert items[0]["role"] == "classifier"
+    assert items[0]["service"] == "avocet"
 
 
 def test_installed_detects_finetuned_model(client):

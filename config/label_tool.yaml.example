@@ -57,11 +57,32 @@ imitate:
     - id: peregrine
       name: Peregrine
       icon: "🦅"
-      description: Job search assistant
-      base_url: http://localhost:8502
-      sample_endpoint: /api/jobs
-      text_fields: [title, description]
-      prompt_template: "Analyze this job listing and identify key requirements:\n\n{text}"
+      description: Job search assistant — live job listings
+      base_url: http://localhost:8601
+      health_path: /api/jobs/counts
+      sample_endpoint: /api/jobs?status=pending&limit=5
+      text_fields: [title, company, description]
+      prompt_template: "Analyze this job listing and identify the key requirements, must-have skills, and any culture signals that would help tailor an application:\n\n{text}"
+
+    - id: osprey
+      name: Osprey
+      icon: "📞"
+      description: Gov't hold-line automation — recent call records
+      base_url: http://localhost:8520
+      health_path: /api/health
+      sample_endpoint: /api/calls/recent
+      text_fields: [agency, issue, notes]
+      prompt_template: "Draft a clear, professional follow-up letter for this government hold-line call. Include what was discussed, what action the agency committed to, and a polite deadline for response:\n\n{text}"
+
+    - id: linnet
+      name: Linnet
+      icon: "🐦"
+      description: Real-time tone annotation — Elcor-style subtext for ND users
+      base_url: http://localhost:8522
+      health_path: /health
+      sample_endpoint: /samples
+      text_fields: [text, context]
+      prompt_template: "Annotate the emotional tone and subtext of the following text using explicit Elcor-style markers (e.g. [SINCERELY], [UNCERTAIN], [FRUSTRATED]). Identify implied emotions, potential sarcasm, and any ambiguity that might be misread by neurodivergent readers:\n\n{text}"
 
     - id: kiwi
       name: Kiwi
