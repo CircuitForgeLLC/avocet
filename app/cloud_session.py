@@ -20,31 +20,14 @@ Usage in FastAPI routes:
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
-from circuitforge_core.cloud_session import CloudSessionFactory, CloudUser
+from circuitforge_core.cloud_session import CloudSessionFactory, CloudUser, detect_byok
 
 __all__ = ["CloudUser", "get_session", "require_tier"]
 
-_BYOK_CONFIG = Path.home() / ".config" / "circuitforge" / "llm.yaml"
-
-
-def _detect_byok() -> bool:
-    try:
-        import yaml
-        with open(_BYOK_CONFIG) as f:
-            cfg = yaml.safe_load(f) or {}
-        return any(
-            b.get("enabled", True) and b.get("type") != "vision_service"
-            for b in cfg.get("backends", {}).values()
-        )
-    except Exception:
-        return False
-
-
 _factory = CloudSessionFactory(
     product="avocet",
-    byok_detector=_detect_byok,
+    byok_detector=detect_byok,
 )
 
 get_session = _factory.dependency()
