@@ -20,3 +20,7 @@ data/sft_approved.jsonl
 # Claude context — BSL 1.1, keep out of version control
 CLAUDE.md
 docs/superpowers/
+.superpowers/
+
+# Git worktrees
+.worktrees/
