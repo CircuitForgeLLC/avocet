@@ -28,6 +28,10 @@ def test_app_has_required_routes():
     # Train routes
     assert "/api/train/jobs" in paths
     assert "/api/train/results" in paths
+    # Dashboard
+    assert "/api/dashboard" in paths
+    # Corrections (new prefix)
+    assert "/api/corrections/ingest" in paths
 
 
 @pytest.fixture
