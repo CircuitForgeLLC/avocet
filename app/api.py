@@ -142,6 +142,9 @@ def _normalize(item: dict) -> dict:
 
 app = FastAPI(title="Avocet API")
 
+from app.data.label import router as label_router
+app.include_router(label_router, prefix="/api")
+
 from app.sft import router as sft_router
 app.include_router(sft_router, prefix="/api/sft")
 
@@ -160,183 +163,6 @@ app.include_router(style_router, prefix="/api/style")
 
 # In-memory last-action store (single user, local tool — in-memory is fine)
 _last_action: dict | None = None
-
-
-@app.get("/api/queue")
-def get_queue(limit: int = Query(default=10, ge=1, le=50)):
-    items = _read_jsonl(_queue_file())
-    return {"items": [_normalize(x) for x in items[:limit]], "total": len(items)}
-
-
-class LabelRequest(BaseModel):
-    id: str
-    label: str
-
-
-@app.post("/api/label")
-def post_label(req: LabelRequest):
-    global _last_action
-    items = _read_jsonl(_queue_file())
-    match = next((x for x in items if _normalize(x)["id"] == req.id), None)
-    if not match:
-        raise HTTPException(404, f"Item {req.id!r} not found in queue")
-    record = {**match, "label": req.label,
-              "labeled_at": datetime.now(timezone.utc).isoformat()}
-    _append_jsonl(_score_file(), record)
-    _write_jsonl(_queue_file(), [x for x in items if _normalize(x)["id"] != req.id])
-    _last_action = {"type": "label", "item": match, "label": req.label}
-    return {"ok": True}
-
-
-class SkipRequest(BaseModel):
-    id: str
-
-
-@app.post("/api/skip")
-def post_skip(req: SkipRequest):
-    global _last_action
-    items = _read_jsonl(_queue_file())
-    match = next((x for x in items if _normalize(x)["id"] == req.id), None)
-    if not match:
-        raise HTTPException(404, f"Item {req.id!r} not found in queue")
-    reordered = [x for x in items if _normalize(x)["id"] != req.id] + [match]
-    _write_jsonl(_queue_file(), reordered)
-    _last_action = {"type": "skip", "item": match}
-    return {"ok": True}
-
-
-class DiscardRequest(BaseModel):
-    id: str
-
-
-@app.post("/api/discard")
-def post_discard(req: DiscardRequest):
-    global _last_action
-    items = _read_jsonl(_queue_file())
-    match = next((x for x in items if _normalize(x)["id"] == req.id), None)
-    if not match:
-        raise HTTPException(404, f"Item {req.id!r} not found in queue")
-    record = {**match, "label": "__discarded__",
-              "discarded_at": datetime.now(timezone.utc).isoformat()}
-    _append_jsonl(_discarded_file(), record)
-    _write_jsonl(_queue_file(), [x for x in items if _normalize(x)["id"] != req.id])
-    _last_action = {"type": "discard", "item": match}
-    return {"ok": True}
-
-
-@app.delete("/api/label/undo")
-def delete_undo():
-    global _last_action
-    if not _last_action:
-        raise HTTPException(404, "No action to undo")
-    action = _last_action
-    item = action["item"]   # always the original clean queue item
-
-    # Perform file operations FIRST — only clear _last_action on success
-    if action["type"] == "label":
-        records = _read_jsonl(_score_file())
-        if not records:
-            raise HTTPException(409, "Score file is empty — cannot undo label")
-        _write_jsonl(_score_file(), records[:-1])
-        items = _read_jsonl(_queue_file())
-        _write_jsonl(_queue_file(), [item] + items)
-    elif action["type"] == "discard":
-        records = _read_jsonl(_discarded_file())
-        if not records:
-            raise HTTPException(409, "Discarded file is empty — cannot undo discard")
-        _write_jsonl(_discarded_file(), records[:-1])
-        items = _read_jsonl(_queue_file())
-        _write_jsonl(_queue_file(), [item] + items)
-    elif action["type"] == "skip":
-        items = _read_jsonl(_queue_file())
-        item_id = _normalize(item)["id"]
-        items = [item] + [x for x in items if _normalize(x)["id"] != item_id]
-        _write_jsonl(_queue_file(), items)
-
-    # Clear AFTER all file operations succeed
-    _last_action = None
-    return {"undone": {"type": action["type"], "item": _normalize(item)}}
-
-
-# Label metadata — 10 labels matching label_tool.py
-_LABEL_META = [
-    {"name": "interview_scheduled", "emoji": "\U0001f4c5",  "color": "#4CAF50", "key": "1"},
-    {"name": "offer_received",      "emoji": "\U0001f389",  "color": "#2196F3", "key": "2"},
-    {"name": "rejected",            "emoji": "\u274c",      "color": "#F44336", "key": "3"},
-    {"name": "positive_response",   "emoji": "\U0001f44d",  "color": "#FF9800", "key": "4"},
-    {"name": "survey_received",     "emoji": "\U0001f4cb",  "color": "#9C27B0", "key": "5"},
-    {"name": "neutral",             "emoji": "\u2b1c",      "color": "#607D8B", "key": "6"},
-    {"name": "event_rescheduled",   "emoji": "\U0001f504",  "color": "#FF5722", "key": "7"},
-    {"name": "digest",              "emoji": "\U0001f4f0",  "color": "#00BCD4", "key": "8"},
-    {"name": "new_lead",            "emoji": "\U0001f91d",  "color": "#009688", "key": "9"},
-    {"name": "hired",               "emoji": "\U0001f38a",  "color": "#FFC107", "key": "h"},
-]
-
-
-@app.get("/api/config/labels")
-def get_labels():
-    return _LABEL_META
-
-
-@app.get("/api/config")
-def get_config():
-    f = _config_file()
-    if not f.exists():
-        return {"accounts": [], "max_per_account": 500}
-    raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-    return {"accounts": raw.get("accounts", []), "max_per_account": raw.get("max_per_account", 500)}
-
-
-class ConfigPayload(BaseModel):
-    accounts: list[dict]
-    max_per_account: int = 500
-
-
-@app.post("/api/config")
-def post_config(payload: ConfigPayload):
-    f = _config_file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".tmp")
-    tmp.write_text(yaml.dump(payload.model_dump(), allow_unicode=True, sort_keys=False),
-                   encoding="utf-8")
-    tmp.rename(f)
-    return {"ok": True}
-
-
-@app.get("/api/stats")
-def get_stats():
-    records = _read_jsonl(_score_file())
-    counts: dict[str, int] = {}
-    for r in records:
-        lbl = r.get("label", "")
-        if lbl:
-            counts[lbl] = counts.get(lbl, 0) + 1
-    benchmark_results: dict = {}
-    benchmark_path = _DATA_DIR / "benchmark_results.json"
-    if benchmark_path.exists():
-        try:
-            benchmark_results = json.loads(benchmark_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {
-        "total": len(records),
-        "counts": counts,
-        "score_file_bytes": _score_file().stat().st_size if _score_file().exists() else 0,
-        "benchmark_results": benchmark_results,
-    }
-
-
-@app.get("/api/stats/download")
-def download_stats():
-    from fastapi.responses import FileResponse
-    if not _score_file().exists():
-        raise HTTPException(404, "No score file")
-    return FileResponse(
-        str(_score_file()),
-        filename="email_score.jsonl",
-        media_type="application/jsonlines",
-        headers={"Content-Disposition": 'attachment; filename="email_score.jsonl"'},
-    )
 
 
 class AccountTestRequest(BaseModel):
@@ -575,9 +401,10 @@ def fetch_stream(
     mode: str = Query(default="wide"),
 ):
     from app.imap_fetch import fetch_account_stream
+    from app.data.label import get_config
 
     selected_names = {n.strip() for n in accounts.split(",") if n.strip()}
-    config = get_config()  # reuse existing endpoint logic
+    config = get_config()  # reuse label module config logic
     selected = [a for a in config["accounts"] if a.get("name") in selected_names]
 
     def generate():

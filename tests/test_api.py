@@ -7,10 +7,15 @@ from app import api as api_module  # noqa: F401
 @pytest.fixture(autouse=True)
 def reset_globals(tmp_path):
     from app import api
+    from app.data import label as label_module
     api.set_data_dir(tmp_path)
     api.reset_last_action()
+    label_module.set_data_dir(tmp_path)
+    label_module.set_config_dir(tmp_path)
+    label_module.reset_last_action()
     yield
     api.reset_last_action()
+    label_module.reset_last_action()
 
 
 def test_import():
@@ -160,9 +165,12 @@ def test_config_labels_returns_metadata(client):
 def config_dir(tmp_path):
     """Give the API a writable config directory."""
     from app import api as api_module
+    from app.data import label as label_module
     api_module.set_config_dir(tmp_path)
+    label_module.set_config_dir(tmp_path)
     yield tmp_path
     api_module.set_config_dir(None)   # reset to default
+    label_module.set_config_dir(None)
 
 
 @pytest.fixture
