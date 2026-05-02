@@ -126,6 +126,9 @@ app.include_router(fetch_router, prefix="/api")
 from app.train.train import router as train_router
 app.include_router(train_router, prefix="/api/train")
 
+from app.dashboard import router as dashboard_router
+app.include_router(dashboard_router, prefix="/api")
+
 
 # Static SPA — MUST be last (catches all unmatched paths)
 _DIST = _ROOT / "web" / "dist"
