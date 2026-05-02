@@ -1,4 +1,4 @@
-"""API integration tests for app/sft.py — /api/sft/* endpoints."""
+"""API integration tests for app/sft.py -- /api/sft/* endpoints."""
 import json
 import pytest
 from fastapi.testclient import TestClient
@@ -7,17 +7,17 @@ from pathlib import Path
 
 @pytest.fixture(autouse=True)
 def reset_sft_globals(tmp_path):
-    from app import sft as sft_module
-    _prev_data    = sft_module._SFT_DATA_DIR
-    _prev_cfg     = sft_module._SFT_CONFIG_DIR
-    _prev_default = sft_module._DEFAULT_BENCH_RESULTS_DIR
-    sft_module.set_sft_data_dir(tmp_path)
-    sft_module.set_sft_config_dir(tmp_path)
-    sft_module.set_default_bench_results_dir(str(tmp_path / "bench_results"))
+    from app.data import corrections as corr_module
+    _prev_data    = corr_module._DATA_DIR
+    _prev_cfg     = corr_module._CONFIG_DIR
+    _prev_default = corr_module._DEFAULT_BENCH_RESULTS_DIR
+    corr_module.set_data_dir(tmp_path)
+    corr_module.set_config_dir(tmp_path)
+    corr_module.set_default_bench_results_dir(str(tmp_path / "bench_results"))
     yield
-    sft_module.set_sft_data_dir(_prev_data)
-    sft_module.set_sft_config_dir(_prev_cfg)
-    sft_module.set_default_bench_results_dir(_prev_default)
+    corr_module.set_data_dir(_prev_data)
+    corr_module.set_config_dir(_prev_cfg)
+    corr_module.set_default_bench_results_dir(_prev_default)
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def _write_config(tmp_path, bench_results_dir: Path) -> None:
     )
 
 
-# ── /api/sft/runs ──────────────────────────────────────────────────────────
+# -- /api/sft/runs -------------------------------------------------------------
 
 def test_runs_returns_empty_when_no_config(client):
     r = client.get("/api/sft/runs")
@@ -86,7 +86,7 @@ def test_runs_returns_available_runs(client, tmp_path):
 def test_runs_marks_already_imported(client, tmp_path):
     _write_run(tmp_path, "2026-04-07-143022", [_make_record("a")])
     _write_config(tmp_path, tmp_path / "bench_results")
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     candidates = sft_module._candidates_file()
     candidates.parent.mkdir(parents=True, exist_ok=True)
     candidates.write_text(
@@ -97,7 +97,7 @@ def test_runs_marks_already_imported(client, tmp_path):
     assert r.json()[0]["already_imported"] is True
 
 
-# ── /api/sft/import ─────────────────────────────────────────────────────────
+# -- /api/sft/import -----------------------------------------------------------
 
 def test_import_adds_records(client, tmp_path):
     _write_run(tmp_path, "2026-04-07-143022", [_make_record("a"), _make_record("b")])
@@ -121,10 +121,10 @@ def test_import_unknown_run_returns_404(client, tmp_path):
     assert r.status_code == 404
 
 
-# ── /api/sft/queue ──────────────────────────────────────────────────────────
+# -- /api/sft/queue ------------------------------------------------------------
 
 def _populate_candidates(tmp_path, records: list[dict]) -> None:
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     path = sft_module._candidates_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -164,7 +164,7 @@ def test_queue_empty_when_no_file(client):
     assert r.json() == {"items": [], "total": 0, "page": 1, "per_page": 20}
 
 
-# ── /api/sft/submit ─────────────────────────────────────────────────────────
+# -- /api/sft/submit -----------------------------------------------------------
 
 def test_submit_correct_sets_approved(client, tmp_path):
     _populate_candidates(tmp_path, [_make_record("a")])
@@ -173,7 +173,7 @@ def test_submit_correct_sets_approved(client, tmp_path):
         "corrected_response": "def add(a, b): return a + b",
     })
     assert r.status_code == 200
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     records = sft_module._read_candidates()
     assert records[0]["status"] == "approved"
     assert records[0]["corrected_response"] == "def add(a, b): return a + b"
@@ -185,7 +185,7 @@ def test_submit_correct_also_appends_to_approved_file(client, tmp_path):
         "id": "a", "action": "correct",
         "corrected_response": "def add(a, b): return a + b",
     })
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     from app.utils import read_jsonl
     approved = read_jsonl(sft_module._approved_file())
     assert len(approved) == 1
@@ -196,7 +196,7 @@ def test_submit_discard_sets_discarded(client, tmp_path):
     _populate_candidates(tmp_path, [_make_record("a")])
     r = client.post("/api/sft/submit", json={"id": "a", "action": "discard"})
     assert r.status_code == 200
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     assert sft_module._read_candidates()[0]["status"] == "discarded"
 
 
@@ -204,7 +204,7 @@ def test_submit_flag_sets_model_rejected(client, tmp_path):
     _populate_candidates(tmp_path, [_make_record("a")])
     r = client.post("/api/sft/submit", json={"id": "a", "action": "flag"})
     assert r.status_code == 200
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     assert sft_module._read_candidates()[0]["status"] == "model_rejected"
 
 
@@ -243,7 +243,7 @@ def test_submit_correct_stores_failure_category(client, tmp_path):
         "failure_category": "style_violation",
     })
     assert r.status_code == 200
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     records = sft_module._read_candidates()
     assert records[0]["failure_category"] == "style_violation"
 
@@ -255,7 +255,7 @@ def test_submit_correct_null_failure_category(client, tmp_path):
         "corrected_response": "def add(a, b): return a + b",
     })
     assert r.status_code == 200
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     records = sft_module._read_candidates()
     assert records[0]["failure_category"] is None
 
@@ -270,14 +270,14 @@ def test_submit_invalid_failure_category_returns_422(client, tmp_path):
     assert r.status_code == 422
 
 
-# ── /api/sft/undo ────────────────────────────────────────────────────────────
+# -- /api/sft/undo -------------------------------------------------------------
 
 def test_undo_restores_discarded_to_needs_review(client, tmp_path):
     _populate_candidates(tmp_path, [_make_record("a")])
     client.post("/api/sft/submit", json={"id": "a", "action": "discard"})
     r = client.post("/api/sft/undo", json={"id": "a"})
     assert r.status_code == 200
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     assert sft_module._read_candidates()[0]["status"] == "needs_review"
 
 
@@ -288,7 +288,7 @@ def test_undo_removes_approved_from_approved_file(client, tmp_path):
         "corrected_response": "def add(a, b): return a + b",
     })
     client.post("/api/sft/undo", json={"id": "a"})
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     from app.utils import read_jsonl
     approved = read_jsonl(sft_module._approved_file())
     assert not any(r["id"] == "a" for r in approved)
@@ -300,10 +300,10 @@ def test_undo_already_needs_review_returns_409(client, tmp_path):
     assert r.status_code == 409
 
 
-# ── /api/sft/export ──────────────────────────────────────────────────────────
+# -- /api/sft/export -----------------------------------------------------------
 
 def test_export_returns_approved_as_sft_jsonl(client, tmp_path):
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     from app.utils import write_jsonl
     approved = {
         **_make_record("a"),
@@ -331,7 +331,7 @@ def test_export_returns_approved_as_sft_jsonl(client, tmp_path):
 
 
 def test_export_excludes_non_approved(client, tmp_path):
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     from app.utils import write_jsonl
     records = [
         {**_make_record("a"), "status": "discarded", "corrected_response": None},
@@ -348,10 +348,10 @@ def test_export_empty_when_no_approved_file(client):
     assert r.text.strip() == ""
 
 
-# ── /api/sft/stats ───────────────────────────────────────────────────────────
+# -- /api/sft/stats ------------------------------------------------------------
 
 def test_stats_counts_by_status(client, tmp_path):
-    from app import sft as sft_module
+    from app.data import corrections as sft_module
     from app.utils import write_jsonl
     records = [
         _make_record("a"),
