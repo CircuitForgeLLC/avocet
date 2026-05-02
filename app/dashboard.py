@@ -94,8 +94,8 @@ def _find_latest_eval(results_dir_override: str = "") -> tuple[str | None, float
                 rd = (raw.get("cforch", {}) or {}).get("results_dir", "")
                 if rd:
                     candidates.append(Path(rd))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to read cforch.results_dir from config: %s", exc)
     candidates.append(_ROOT / "bench_results")
 
     for rdir in candidates:
@@ -110,8 +110,8 @@ def _find_latest_eval(results_dir_override: str = "") -> tuple[str | None, float
                     ts = data.get("timestamp") or subdir.name
                     score = data.get("best_macro_f1") or data.get("macro_f1")
                     return ts, (float(score) if isinstance(score, (int, float)) else None)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Failed to parse summary.json at %s: %s", summary, exc)
     return None, None
 
 def _count_corrections() -> tuple[int, int]:
