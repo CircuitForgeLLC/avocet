@@ -22,44 +22,11 @@ _DATA_DIR: Path = _ROOT / "data"     # overridable in tests via set_data_dir()
 _MODELS_DIR: Path = _ROOT / "models" # overridable in tests via set_models_dir()
 _CONFIG_DIR: Path | None = None      # None = use real path
 
-# Process registry for running jobs — used by cancel endpoints.
-# Keys: "benchmark" | "finetune". Values: the live Popen object.
-_running_procs: dict = {}
-_cancelled_jobs: set = set()
-
 
 def set_data_dir(path: Path) -> None:
     """Override data directory — used by tests."""
     global _DATA_DIR
     _DATA_DIR = path
-
-
-def _best_cuda_device() -> str:
-    """Return the index of the GPU with the most free VRAM as a string.
-
-    Uses nvidia-smi so it works in the job-seeker env (no torch). Returns ""
-    if nvidia-smi is unavailable or no GPUs are found. Restricting the
-    training subprocess to a single GPU via CUDA_VISIBLE_DEVICES prevents
-    PyTorch DataParallel from replicating the model across all GPUs, which
-    would OOM the GPU with less headroom.
-    """
-    try:
-        out = _subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=index,memory.free",
-             "--format=csv,noheader,nounits"],
-            text=True,
-            timeout=5,
-        )
-        best_idx, best_free = "", 0
-        for line in out.strip().splitlines():
-            parts = line.strip().split(", ")
-            if len(parts) == 2:
-                idx, free = parts[0].strip(), int(parts[1].strip())
-                if free > best_free:
-                    best_free, best_idx = free, idx
-        return best_idx
-    except Exception:
-        return ""
 
 
 def set_models_dir(path: Path) -> None:
@@ -156,116 +123,8 @@ app.include_router(imitate_router, prefix="/api/imitate")
 from app.data.fetch import router as fetch_router
 app.include_router(fetch_router, prefix="/api")
 
-
-from fastapi.responses import StreamingResponse
-
-
-# ---------------------------------------------------------------------------
-# Finetune endpoints
-# ---------------------------------------------------------------------------
-
-@app.get("/api/finetune/status")
-def get_finetune_status():
-    """Scan models/ for training_info.json files. Returns [] if none exist."""
-    models_dir = _MODELS_DIR
-    if not models_dir.exists():
-        return []
-    results = []
-    for sub in models_dir.iterdir():
-        if not sub.is_dir():
-            continue
-        info_path = sub / "training_info.json"
-        if not info_path.exists():
-            continue
-        try:
-            info = json.loads(info_path.read_text(encoding="utf-8"))
-            results.append(info)
-        except Exception:
-            pass
-    return results
-
-
-@app.get("/api/finetune/run")
-def run_finetune_endpoint(
-    model: str = "deberta-small",
-    epochs: int = 5,
-    score: list[str] = Query(default=[]),
-):
-    """Spawn finetune_classifier.py and stream stdout as SSE progress events."""
-    python_bin = "/devl/miniconda3/envs/job-seeker-classifiers/bin/python"
-    script = str(_ROOT / "scripts" / "finetune_classifier.py")
-    cmd = [python_bin, script, "--model", model, "--epochs", str(epochs)]
-    data_root = _DATA_DIR.resolve()
-    for score_file in score:
-        resolved = (_DATA_DIR / score_file).resolve()
-        if not str(resolved).startswith(str(data_root)):
-            raise HTTPException(400, f"Invalid score path: {score_file!r}")
-        cmd.extend(["--score", str(resolved)])
-
-    # Pick the GPU with the most free VRAM. Setting CUDA_VISIBLE_DEVICES to a
-    # single device prevents DataParallel from replicating the model across all
-    # GPUs, which would force a full copy onto the more memory-constrained device.
-    proc_env = {**os.environ, "PYTORCH_ALLOC_CONF": "expandable_segments:True"}
-    best_gpu = _best_cuda_device()
-    if best_gpu:
-        proc_env["CUDA_VISIBLE_DEVICES"] = best_gpu
-
-    gpu_note = f"GPU {best_gpu}" if best_gpu else "CPU (no GPU found)"
-
-    def generate():
-        yield f"data: {json.dumps({'type': 'progress', 'message': f'[api] Using {gpu_note} (most free VRAM)'})}\n\n"
-        try:
-            proc = _subprocess.Popen(
-                cmd,
-                stdout=_subprocess.PIPE,
-                stderr=_subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                cwd=str(_ROOT),
-                env=proc_env,
-            )
-            _running_procs["finetune"] = proc
-            _cancelled_jobs.discard("finetune")  # clear any stale flag from a prior run
-            try:
-                for line in proc.stdout:
-                    line = line.rstrip()
-                    if line:
-                        yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
-                proc.wait()
-                if proc.returncode == 0:
-                    yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-                elif "finetune" in _cancelled_jobs:
-                    _cancelled_jobs.discard("finetune")
-                    yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'Process exited with code {proc.returncode}'})}\n\n"
-            finally:
-                _running_procs.pop("finetune", None)
-        except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-
-@app.post("/api/finetune/cancel")
-def cancel_finetune():
-    """Kill the running fine-tune subprocess. 404 if none is running."""
-    proc = _running_procs.get("finetune")
-    if proc is None:
-        raise HTTPException(404, "No finetune is running")
-    _cancelled_jobs.add("finetune")
-    proc.terminate()
-    try:
-        proc.wait(timeout=3)
-    except _subprocess.TimeoutExpired:
-        proc.kill()
-    return {"status": "cancelled"}
-
+from app.train.train import router as train_router
+app.include_router(train_router, prefix="/api/train")
 
 
 # Static SPA — MUST be last (catches all unmatched paths)
