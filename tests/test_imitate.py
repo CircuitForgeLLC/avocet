@@ -1,4 +1,4 @@
-"""Tests for app/imitate.py — product registry, sample extraction, corrections push."""
+"""Tests for app/imitate.py -- product registry, sample extraction, corrections push."""
 from __future__ import annotations
 
 import json
@@ -9,10 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import app
-from app import imitate as _imitate_module
+from app.data import imitate as _imitate_module
 
 
-# ── Fixtures ───────────────────────────────────────────────────────────────────
+# -- Fixtures ------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
 def reset_module_globals(tmp_path):
@@ -70,7 +70,7 @@ def client() -> TestClient:
     return TestClient(app, raise_server_exceptions=True)
 
 
-# ── GET /products ──────────────────────────────────────────────────────────────
+# -- GET /products -------------------------------------------------------------
 
 def test_products_empty_when_no_config(config_dir, client):
     """Returns empty list when label_tool.yaml has no imitate section."""
@@ -102,7 +102,7 @@ def test_products_offline_when_unreachable(cfg_with_products, client):
     assert all(not p["online"] for p in resp.json()["products"])
 
 
-# ── GET /products/{id}/sample ─────────────────────────────────────────────────
+# -- GET /products/{id}/sample -------------------------------------------------
 
 def test_sample_unknown_product(cfg_with_products, client):
     """Returns 404 for a product id not in config."""
@@ -149,7 +149,7 @@ def test_sample_404_on_empty_list(cfg_with_products, client):
     assert resp.status_code == 404
 
 
-# ── POST /push-corrections ─────────────────────────────────────────────────────
+# -- POST /push-corrections ----------------------------------------------------
 
 def test_push_corrections_appends_jsonl(cfg_with_products, data_dir, client):
     """Successful push writes records to sft_candidates.jsonl."""
@@ -214,7 +214,7 @@ def test_push_corrections_all_errors_422(cfg_with_products, data_dir, client):
     assert resp.status_code == 422
 
 
-# ── _extract_sample helper ─────────────────────────────────────────────────────
+# -- _extract_sample helper ----------------------------------------------------
 
 def test_extract_sample_list():
     result = _imitate_module._extract_sample(
