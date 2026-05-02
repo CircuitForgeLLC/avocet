@@ -80,11 +80,6 @@ def _config_file() -> Path:
     return _ROOT / "config" / "label_tool.yaml"
 
 
-def reset_last_action() -> None:
-    """Reset undo state — used by tests."""
-    global _last_action
-    _last_action = None
-
 
 def _queue_file() -> Path:
     return _DATA_DIR / "email_label_queue.jsonl"
@@ -160,9 +155,6 @@ app.include_router(imitate_router, prefix="/api/imitate")
 
 from app.style import router as style_router
 app.include_router(style_router, prefix="/api/style")
-
-# In-memory last-action store (single user, local tool — in-memory is fine)
-_last_action: dict | None = None
 
 
 class AccountTestRequest(BaseModel):

@@ -9,12 +9,10 @@ def reset_globals(tmp_path):
     from app import api
     from app.data import label as label_module
     api.set_data_dir(tmp_path)
-    api.reset_last_action()
     label_module.set_data_dir(tmp_path)
     label_module.set_config_dir(tmp_path)
     label_module.reset_last_action()
     yield
-    api.reset_last_action()
     label_module.reset_last_action()
 
 

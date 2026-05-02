@@ -106,7 +106,7 @@ def read_jsonl(path: Path) -> list[dict]:
 def write_jsonl(path: Path, records: list[dict]) -> None:
     """Write records to a JSONL file, overwriting any existing content."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    content = "\n".join(json.dumps(r) for r in records)
+    content = "\n".join(json.dumps(r, ensure_ascii=False) for r in records)
     path.write_text(content + ("\n" if records else ""), encoding="utf-8")
 
 
@@ -114,4 +114,4 @@ def append_jsonl(path: Path, record: dict) -> None:
     """Append a single record to a JSONL file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record) + "\n")
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
