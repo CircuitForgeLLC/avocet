@@ -147,113 +147,17 @@ from app.models import router as models_router
 import app.models as _models_module
 app.include_router(models_router, prefix="/api/models")
 
-from app.cforch import router as cforch_router
-app.include_router(cforch_router, prefix="/api/cforch")
+from app.eval.cforch import router as eval_router
+app.include_router(eval_router, prefix="/api")
 
 from app.imitate import router as imitate_router
 app.include_router(imitate_router, prefix="/api/imitate")
-
-from app.style import router as style_router
-app.include_router(style_router, prefix="/api/style")
 
 from app.data.fetch import router as fetch_router
 app.include_router(fetch_router, prefix="/api")
 
 
 from fastapi.responses import StreamingResponse
-
-
-# ---------------------------------------------------------------------------
-# Benchmark endpoints
-# ---------------------------------------------------------------------------
-
-@app.get("/api/benchmark/models")
-def get_benchmark_models() -> dict:
-    """Return installed models grouped by adapter_type category."""
-    models_dir: Path = _models_module._MODELS_DIR
-    categories: dict[str, list[dict]] = {
-        "ZeroShotAdapter": [],
-        "RerankerAdapter": [],
-        "GenerationAdapter": [],
-        "Unknown": [],
-    }
-    if models_dir.exists():
-        for sub in models_dir.iterdir():
-            if not sub.is_dir():
-                continue
-            info_path = sub / "model_info.json"
-            adapter_type = "Unknown"
-            repo_id: str | None = None
-            if info_path.exists():
-                try:
-                    info = json.loads(info_path.read_text(encoding="utf-8"))
-                    adapter_type = info.get("adapter_type") or info.get("adapter_recommendation") or "Unknown"
-                    repo_id = info.get("repo_id")
-                except Exception:
-                    pass
-            bucket = adapter_type if adapter_type in categories else "Unknown"
-            entry: dict = {"name": sub.name, "repo_id": repo_id, "adapter_type": adapter_type}
-            categories[bucket].append(entry)
-    return {"categories": categories}
-
-
-@app.get("/api/benchmark/results")
-def get_benchmark_results():
-    """Return the most recently saved benchmark results, or an empty envelope."""
-    path = _DATA_DIR / "benchmark_results.json"
-    if not path.exists():
-        return {"models": {}, "sample_count": 0, "timestamp": None}
-    return json.loads(path.read_text())
-
-
-@app.get("/api/benchmark/run")
-def run_benchmark(include_slow: bool = False, model_names: str = ""):
-    """Spawn the benchmark script and stream stdout as SSE progress events."""
-    python_bin = "/devl/miniconda3/envs/job-seeker-classifiers/bin/python"
-    script = str(_ROOT / "scripts" / "benchmark_classifier.py")
-    cmd = [python_bin, script, "--score", "--save"]
-    if include_slow:
-        cmd.append("--include-slow")
-    if model_names:
-        names = [n.strip() for n in model_names.split(",") if n.strip()]
-        if names:
-            cmd.extend(["--models"] + names)
-
-    def generate():
-        try:
-            proc = _subprocess.Popen(
-                cmd,
-                stdout=_subprocess.PIPE,
-                stderr=_subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                cwd=str(_ROOT),
-            )
-            _running_procs["benchmark"] = proc
-            _cancelled_jobs.discard("benchmark")  # clear any stale flag from a prior run
-            try:
-                for line in proc.stdout:
-                    line = line.rstrip()
-                    if line:
-                        yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
-                proc.wait()
-                if proc.returncode == 0:
-                    yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-                elif "benchmark" in _cancelled_jobs:
-                    _cancelled_jobs.discard("benchmark")
-                    yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'Process exited with code {proc.returncode}'})}\n\n"
-            finally:
-                _running_procs.pop("benchmark", None)
-        except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -346,20 +250,6 @@ def run_finetune_endpoint(
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
-
-@app.post("/api/benchmark/cancel")
-def cancel_benchmark():
-    """Kill the running benchmark subprocess. 404 if none is running."""
-    proc = _running_procs.get("benchmark")
-    if proc is None:
-        raise HTTPException(404, "No benchmark is running")
-    _cancelled_jobs.add("benchmark")
-    proc.terminate()
-    try:
-        proc.wait(timeout=3)
-    except _subprocess.TimeoutExpired:
-        proc.kill()
-    return {"status": "cancelled"}
 
 
 @app.post("/api/finetune/cancel")

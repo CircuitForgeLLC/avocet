@@ -367,3 +367,13 @@ def test_run_passes_license_key_env_to_subprocess(client, config_dir, tmp_path, 
         client.get("/api/cforch/run")
 
     assert captured_env.get("CF_LICENSE_KEY") == "CFG-AVCT-ENV-ONLY-KEY"
+
+
+def test_eval_cforch_router_includes_all_sub_routers():
+    """eval/cforch.py router must include routes from all four sub-routers."""
+    from app.eval.cforch import router
+    paths = {r.path for r in router.routes}
+    assert any("/cforch/" in p for p in paths), f"no /cforch/ routes found in {paths}"
+    assert any("/style/" in p for p in paths), f"no /style/ routes found in {paths}"
+    assert any("/voice/" in p for p in paths), f"no /voice/ routes found in {paths}"
+    assert any("/plans-bench/" in p for p in paths), f"no /plans-bench/ routes found in {paths}"
