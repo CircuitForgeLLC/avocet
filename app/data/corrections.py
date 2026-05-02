@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -333,3 +335,59 @@ def post_sft_config(payload: SftConfigPayload) -> dict:
     tmp.write_text(yaml.dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
     tmp.rename(f)
     return {"ok": True}
+
+
+# -- POST /ingest --------------------------------------------------------------
+
+class IngestRequest(BaseModel):
+    source: str          # e.g. "peregrine", "kiwi"
+    task_type: str       # e.g. "email_classification", "recipe_suggestion"
+    prompt: str          # the prompt that was sent to the LLM
+    response: str        # the LLM's original response
+    correction: str      # the human-corrected response
+    label: str | None = None  # optional label/category
+
+
+@router.post("/ingest")
+def post_ingest(
+    req: IngestRequest,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Ingest a correction from a sibling CF product.
+
+    Authentication: Authorization: Bearer <AVOCET_INGESTION_SECRET>
+
+    Creates a sft_candidates record with status='approved' (pre-approved by
+    the calling product -- human review already happened upstream). Also writes
+    to sft_approved.jsonl so it is immediately included in export counts.
+
+    Returns {"ok": True, "id": "<uuid>"}.
+    """
+    expected_secret = os.environ.get("AVOCET_INGESTION_SECRET", "")
+    if not expected_secret:
+        raise HTTPException(503, "Ingestion not configured -- AVOCET_INGESTION_SECRET not set")
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing or malformed Authorization header")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    if token != expected_secret:
+        raise HTTPException(403, "Invalid ingestion secret")
+
+    record_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "id":                 record_id,
+        "source":             req.source,
+        "task_type":          req.task_type,
+        "status":             "approved",
+        "prompt_messages":    [{"role": "user", "content": req.prompt}],
+        "model_response":     req.response,
+        "corrected_response": req.correction,
+        "label":              req.label,
+        "timestamp":          now,
+        "benchmark_run_id":   None,
+    }
+    append_jsonl(_candidates_file(), record)
+    append_jsonl(_approved_file(), record)
+    return {"ok": True, "id": record_id}
