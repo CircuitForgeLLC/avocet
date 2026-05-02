@@ -8,10 +8,13 @@ from app import api as api_module  # noqa: F401
 def reset_globals(tmp_path):
     from app import api
     from app.data import label as label_module
+    from app.data import fetch as fetch_module
     api.set_data_dir(tmp_path)
     label_module.set_data_dir(tmp_path)
     label_module.set_config_dir(tmp_path)
     label_module.reset_last_action()
+    fetch_module.set_data_dir(tmp_path)
+    fetch_module.set_config_dir(tmp_path)
     yield
     label_module.reset_last_action()
 
@@ -273,7 +276,7 @@ def test_account_test_success(client):
     from unittest.mock import MagicMock, patch
     mock_conn = MagicMock()
     mock_conn.select.return_value = ("OK", [b"99"])
-    with patch("app.imap_fetch.imaplib.IMAP4_SSL", return_value=mock_conn):
+    with patch("app.data.fetch.imaplib.IMAP4_SSL", return_value=mock_conn):
         r = client.post("/api/accounts/test", json={"account": {
             "host": "imap.example.com", "port": 993, "use_ssl": True,
             "username": "u@example.com", "password": "pw", "folder": "INBOX",
@@ -322,7 +325,7 @@ def test_fetch_stream_with_mock_imap(client, config_dir, data_dir):
     mock_conn.search.return_value = ("OK", [b"1"])
     mock_conn.fetch.return_value = ("OK", [(b"1 (RFC822 {N})", raw_msg)])
 
-    with patch("app.imap_fetch.imaplib.IMAP4_SSL", return_value=mock_conn):
+    with patch("app.data.fetch.imaplib.IMAP4_SSL", return_value=mock_conn):
         r = client.get("/api/fetch/stream?accounts=Mock&days_back=30&limit=50")
 
     assert r.status_code == 200
