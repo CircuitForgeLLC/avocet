@@ -10,6 +10,8 @@
       <button class="btn-retry" @click="loadResults">Retry</button>
     </div>
 
+    <div v-if="loading" class="loading-state" aria-live="polite">Loading…</div>
+
     <div v-if="!error && results.length === 0 && !loading" class="empty-notice">
       No training results yet. Completed jobs will appear here.
     </div>
@@ -68,10 +70,10 @@ interface TrainResult {
   job_id: string
   model_type: string
   base_model: string
-  val_macro_f1: number
-  val_accuracy: number
+  val_macro_f1: number | null
+  val_accuracy: number | null
   sample_count: number
-  duration_seconds: number
+  duration_seconds: number | null
   created_at: string
 }
 
@@ -88,8 +90,8 @@ async function loadResults() {
       error.value = `Failed to load results (HTTP ${res.status}).`
       return
     }
-    const data = await res.json() as { results: TrainResult[] }
-    results.value = data.results ?? []
+    const raw = await res.json() as { results?: TrainResult[] }
+    results.value = Array.isArray(raw?.results) ? raw.results : []
   } catch {
     error.value = 'Network error loading results.'
   } finally {
@@ -191,6 +193,12 @@ onMounted(() => loadResults())
   padding: 0.75rem;
   border: 1px dashed var(--color-border, #a8b8d0);
   border-radius: var(--radius-md, 0.5rem);
+}
+
+.loading-state {
+  color: var(--color-text-muted, #4a5c7a);
+  font-size: 0.9rem;
+  padding: 0.75rem;
 }
 
 .results-table-wrap { overflow-x: auto; }
