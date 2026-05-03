@@ -174,11 +174,11 @@ class CreateJobRequest(BaseModel):
 # -- Routes ------------------------------------------------------------
 
 @router.get("/jobs")
-def list_jobs() -> list[dict]:
+def list_jobs() -> dict:
     _init_db()
     with _db() as conn:
         rows = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC").fetchall()
-    return [_row_to_dict(r) for r in rows]
+    return {"jobs": [_row_to_dict(r) for r in rows]}
 
 
 @router.post("/jobs")
@@ -321,9 +321,9 @@ def run_job(job_id: str) -> StreamingResponse:
 
 
 @router.get("/results")
-def list_results() -> list[dict]:
+def list_results() -> dict:
     if not _MODELS_DIR.exists():
-        return []
+        return {"results": []}
     results = []
     for sub in _MODELS_DIR.iterdir():
         if not sub.is_dir():
@@ -336,4 +336,4 @@ def list_results() -> list[dict]:
             results.append(info)
         except Exception as exc:
             logger.warning("Failed to read training_info.json from %s: %s", info_path, exc)
-    return results
+    return {"results": results}

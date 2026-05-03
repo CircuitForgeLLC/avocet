@@ -1,7 +1,7 @@
 """Avocet -- SFT candidate corrections API (moved from app/sft.py).
 
 All endpoints are registered on `router` (a FastAPI APIRouter).
-api.py includes this router with prefix="/api/sft".
+Primary prefix: /api/corrections  (backward-compat alias: /api/sft -- pending Vue SPA migration)
 
 Module-level globals (_DATA_DIR, _CONFIG_DIR) follow the same
 testability pattern as api.py -- override them via set_data_dir() and

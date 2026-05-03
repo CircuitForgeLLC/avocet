@@ -205,7 +205,7 @@ async function submitJob() {
       body: JSON.stringify({
         type:      form.value.type,
         model_key: form.value.model_key,
-        config,
+        config_json: config,
       }),
     })
     if (!res.ok) {
@@ -254,7 +254,7 @@ function openLog(id: string) {
   closeSSE = useApiSSE(
     `/api/train/jobs/${encodeURIComponent(id)}/run`,
     (data) => {
-      if (data.type === 'log' || data.type === 'error') {
+      if (data.type === 'log' || data.type === 'progress' || data.type === 'error') {
         logLines.value = [...logLines.value, String(data.message ?? '')]
         nextTick(() => {
           if (logPanelEl.value) {

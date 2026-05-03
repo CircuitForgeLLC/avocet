@@ -32,7 +32,7 @@ def _parse_sse(content: bytes) -> list[dict]:
 def test_list_jobs_empty(client):
     r = client.get("/api/train/jobs")
     assert r.status_code == 200
-    assert r.json() == []
+    assert r.json() == {"jobs": []}
 
 
 def test_create_job_returns_queued_record(client):
@@ -57,7 +57,7 @@ def test_create_job_appears_in_list(client):
     client.post("/api/train/jobs", json={"type": "classifier", "model_key": "deberta-small"})
     r = client.get("/api/train/jobs")
     assert r.status_code == 200
-    assert len(r.json()) == 1
+    assert len(r.json()["jobs"]) == 1
 
 
 def test_get_job_returns_record(client):
@@ -171,7 +171,7 @@ def test_run_unknown_job_returns_404(client):
 def test_results_empty_when_no_models_dir(client):
     r = client.get("/api/train/results")
     assert r.status_code == 200
-    assert r.json() == []
+    assert r.json() == {"results": []}
 
 
 def test_results_returns_training_info(client, tmp_path):
@@ -184,4 +184,4 @@ def test_results_returns_training_info(client, tmp_path):
     r = client.get("/api/train/results")
     assert r.status_code == 200
     data = r.json()
-    assert any(d["name"] == "avocet-deberta-small" for d in data)
+    assert any(d["name"] == "avocet-deberta-small" for d in data["results"])

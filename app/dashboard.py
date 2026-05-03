@@ -155,9 +155,9 @@ def _get_active_jobs() -> list[dict]:
         _init_db()
         with _db() as conn:
             rows = conn.execute(
-                "SELECT id, type, status FROM jobs WHERE status IN ('queued', 'running')"
+                "SELECT id, type, model_key, status FROM jobs WHERE status IN ('queued', 'running')"
             ).fetchall()
-        return [{"id": r["id"], "type": r["type"], "status": r["status"]} for r in rows]
+        return [{"id": r["id"], "type": r["type"], "model_key": r["model_key"], "status": r["status"]} for r in rows]
     except Exception as exc:
         logger.warning("Failed to query train jobs DB: %s", exc)
         return []
