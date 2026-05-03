@@ -18,11 +18,6 @@
       >🤖 LLM Eval</button>
       <button
         class="mode-btn"
-        :class="{ active: benchMode === 'compare' }"
-        @click="benchMode = 'compare'"
-      >⚖️ Compare</button>
-      <button
-        class="mode-btn"
         :class="{ active: benchMode === 'style' }"
         @click="benchMode = 'style'"
       >✍️ Writing Style</button>
@@ -30,7 +25,6 @@
 
     <ClassifierTab v-if="benchMode === 'classifier'" />
     <LlmEvalTab   v-if="benchMode === 'llm'" />
-    <CompareTab   v-if="benchMode === 'compare'" />
     <StyleTab     v-if="benchMode === 'style'" />
   </div>
 </template>
@@ -39,10 +33,9 @@
 import { ref } from 'vue'
 import ClassifierTab from './ClassifierTab.vue'
 import LlmEvalTab   from './LlmEvalTab.vue'
-import CompareTab   from './CompareTab.vue'
 import StyleTab     from './StyleTab.vue'
 
-type BenchMode = 'classifier' | 'llm' | 'compare' | 'style'
+type BenchMode = 'classifier' | 'llm' | 'style'
 const benchMode = ref<BenchMode>('classifier')
 </script>
 
@@ -69,7 +62,7 @@ const benchMode = ref<BenchMode>('classifier')
   margin: 0;
 }
 
-/* ── Mode toggle (segmented control) ────────────────────── */
+/* ── Mode toggle (segmented control) ── */
 .mode-toggle {
   display: inline-flex;
   border: 1px solid var(--color-border, #d0d7e8);
