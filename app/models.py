@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 from datetime import datetime, timezone
@@ -60,6 +61,30 @@ _CF_ORCH_PROFILES_DIR: Path = Path(
 
 router = APIRouter()
 
+# ── HuggingFace auth ─────────────────────────────────────────────────────────
+
+def _get_hf_token() -> str | None:
+    """Return HF token from label_tool.yaml, then HF_TOKEN / HUGGING_FACE_HUB_TOKEN env vars."""
+    config_file = _ROOT / "config" / "label_tool.yaml"
+    if config_file.exists():
+        try:
+            import yaml as _yaml
+            raw = _yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+            token = (raw.get("hf_token") or raw.get("cforch", {}).get("hf_token") or "").strip()
+            if token:
+                return token
+        except Exception:
+            pass
+    return os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
+
+
+# ── GGUF quantization detection ───────────────────────────────────────────────
+# Matches quant identifiers in GGUF filenames: Q4_K_M, Q8_0, F16, IQ3_M, etc.
+_QUANT_RE = re.compile(
+    r'[._-]((?:IQ\d|Q\d)[A-Z0-9_]*|F16|BF16)\.gguf$',
+    re.IGNORECASE,
+)
+
 # ── Download progress shared state ────────────────────────────────────────────
 # Updated by the background download thread; read by GET /download/stream.
 _download_progress: dict[str, Any] = {}
@@ -91,12 +116,15 @@ _TAG_TO_INFO: dict[str, _TagInfo] = {
     "audio-classification":           {"adapter": None, "role": "classifier", "service": "cf-voice"},
     # TTS — cf-tts text-to-speech service
     "text-to-speech":                 {"adapter": None, "role": "tts",       "service": "cf-tts"},
-    # Vision — cf-vision image classification / embedding / VLM service
+    # Vision classifiers / embedders — cf-vision (SigLIP/CLIP-style models)
     "image-classification":           {"adapter": None, "role": "vision",    "service": "cf-vision"},
     "zero-shot-image-classification": {"adapter": None, "role": "vision",    "service": "cf-vision"},
     "image-feature-extraction":       {"adapter": None, "role": "embedding", "service": "cf-vision"},
-    "image-text-to-text":             {"adapter": None, "role": "vlm",       "service": "cf-vision"},
-    "visual-question-answering":      {"adapter": None, "role": "vlm",       "service": "cf-vision"},
+    # Generative VLMs (image+text → text) — run under vllm, not cf-vision.
+    # cf-vision is a classifier/embedder service; generative VLMs like Qwen-VL,
+    # LLaVA, and InternVL are textgen models that happen to accept image inputs.
+    "image-text-to-text":             {"adapter": None, "role": "vlm",       "service": "vllm"},
+    "visual-question-answering":      {"adapter": None, "role": "vlm",       "service": "vllm"},
     # Image generation — cf-image (text → image; distinct from cf-vision image understanding)
     "text-to-image":                  {"adapter": None, "role": "image-gen", "service": "cf-image"},
     # Embedding — cf-core shared embedding layer
@@ -195,10 +223,17 @@ def _get_queue_entry(entry_id: str) -> dict | None:
 def _catalog_key(repo_id: str) -> str:
     """Derive a readable catalog key from repo_id.
 
-    ibm-granite/granite-4.1-8b  →  granite-4.1-8b
-    facebook/bart-large-cnn     →  bart-large-cnn
+    ibm-granite/granite-4.1-8b              →  granite-4.1-8b
+    facebook/bart-large-cnn                 →  bart-large-cnn
+    WithinUsAI/Opus4.7-GODs.Ghost.Codex-4B.GGuF  →  opus4.7-gods.ghost.codex-4b
+
+    The coordinator skips catalog lookup for keys ending in ".gguf" (treats them
+    as direct file paths). Strip the suffix so GGUF repo names produce valid keys.
     """
-    return repo_id.split("/", 1)[-1].lower()
+    key = repo_id.split("/", 1)[-1].lower()
+    if key.endswith(".gguf"):
+        key = key[:-5]
+    return key
 
 
 def _insert_catalog_entry(content: str, entry_lines: str) -> str:
@@ -290,6 +325,15 @@ def _register_in_node_catalogs(
             max_mb: int = cf_text.get("max_mb", 0)
             catalog: dict = cf_text.get("catalog") or {}
 
+            # If the node has a different local model dir, remap the NFS path.
+            model_base = cf_text.get("model_base_path", "").rstrip("/")
+            if model_base:
+                nfs_base = str(_CF_TEXT_MODELS_DIR).rstrip("/")
+                model_name = local_path.name
+                effective_path_str = f"{model_base}/{model_name}"
+            else:
+                effective_path_str = local_path_str
+
             # Skip if key already exists
             if model_key in catalog:
                 logger.debug("Key %r already in %s — skipping", model_key, yaml_file.name)
@@ -301,10 +345,10 @@ def _register_in_node_catalogs(
                 for entry in catalog.values()
                 if isinstance(entry, dict)
             }
-            if local_path_str in registered_paths or any(
-                p.startswith(local_path_str + "/") for p in registered_paths
+            if effective_path_str in registered_paths or any(
+                p.startswith(effective_path_str + "/") for p in registered_paths
             ):
-                logger.debug("Path %s already registered in %s — skipping", local_path_str, yaml_file.name)
+                logger.debug("Path %s already registered in %s — skipping", effective_path_str, yaml_file.name)
                 continue
 
             # Determine whether model fits at FP16 or needs 4-bit
@@ -330,12 +374,18 @@ def _register_in_node_catalogs(
                 if needs_4bit
                 else f"  # FP16 file-size estimate"
             )
+            env_block = (
+                f"        env:\n"
+                f"          CF_TEXT_4BIT: \"1\"\n"
+                if needs_4bit else ""
+            )
             entry_block = (
                 f"      # auto-registered by avocet on download\n"
                 f"      {model_key}:\n"
-                f"        path: {local_path_str}\n"
+                f"        path: {effective_path_str}\n"
                 f"        vram_mb: {vram_for_node}{vram_comment}\n"
                 f"        description: \"{desc}\"\n"
+                f"{env_block}"
             )
 
             new_content = _insert_catalog_entry(content, entry_block)
@@ -388,12 +438,17 @@ def _run_download(
     role: str | None = None,
     service: str | None = None,
     model_size_bytes: int = 0,
+    quant_pattern: str | None = None,
 ) -> None:
     """Background thread: download model via huggingface_hub.snapshot_download.
 
     model_size_bytes is the sum of file sizes reported by the HF API (siblings).
     It is used to estimate vram_mb and written to model_info.json so cf-orch can
     budget VRAM when allocating a cf-text instance for this model.
+
+    quant_pattern: when set, restricts snapshot_download to only files matching
+    *{quant_pattern}*.gguf (plus metadata). Avoids downloading every quant variant
+    from GGUF-only repos like bartowski/*.
     """
     global _download_progress
     local_dir = _model_dir_for(repo_id, service)
@@ -422,10 +477,20 @@ def _run_download(
 
         local_dir.mkdir(parents=True, exist_ok=True)
         poll_thread.start()
-        snapshot_download(
-            repo_id=repo_id,
-            local_dir=str(local_dir),
-        )
+
+        dl_kwargs: dict[str, Any] = {"repo_id": repo_id, "local_dir": str(local_dir)}
+        hf_token = _get_hf_token()
+        if hf_token:
+            dl_kwargs["token"] = hf_token
+        if quant_pattern:
+            # Include both cases: repos use mixed conventions (Q6_K vs q6_k).
+            dl_kwargs["allow_patterns"] = [
+                f"*{quant_pattern.upper()}*.gguf",
+                f"*{quant_pattern.lower()}*.gguf",
+                "*.json",
+                "README.md",
+            ]
+        snapshot_download(**dl_kwargs)
 
         # Estimate VRAM from reported file size.
         # HF siblings sizes are pre-quantisation file sizes; add 10% for KV cache
@@ -531,9 +596,31 @@ def lookup_model(repo_id: str) -> dict:
         )
         logger.warning("Unsupported pipeline_tag %r for %s", pipeline_tag, repo_id)
 
-    # Estimate model size from siblings list
+    # Detect GGUF files and parse quant names from siblings list.
+    # For GGUF-only repos (bartowski, TheBloke, etc.) this lets the UI show
+    # a per-quant size picker instead of downloading every variant.
     siblings = data.get("siblings") or []
-    model_size_bytes: int = sum(s.get("size", 0) for s in siblings if isinstance(s, dict))
+    gguf_files: list[dict] = []
+    for s in siblings:
+        if not isinstance(s, dict):
+            continue
+        fname: str = s.get("rfilename", "")
+        if not fname.lower().endswith(".gguf"):
+            continue
+        m = _QUANT_RE.search(fname)
+        gguf_files.append({
+            "filename": fname,
+            "size": s.get("size", 0) or 0,
+            "quant_name": m.group(1).upper() if m else None,
+        })
+    gguf_files.sort(key=lambda f: f["size"])
+
+    # model_size_bytes: total of all siblings (for non-GGUF repos) or all GGUFs only.
+    # For GGUF repos the frontend will substitute the selected quant's size on submit.
+    if gguf_files:
+        model_size_bytes: int = sum(f["size"] for f in gguf_files)
+    else:
+        model_size_bytes = sum(s.get("size", 0) for s in siblings if isinstance(s, dict))
 
     # Description: first 300 chars of card data (modelId field used as fallback)
     card_data = data.get("cardData") or {}
@@ -549,6 +636,7 @@ def lookup_model(repo_id: str) -> dict:
         "compatible": compatible,
         "warning": warning,
         "model_size_bytes": model_size_bytes,
+        "gguf_files": gguf_files if gguf_files else None,
         "description": description,
         "tags": data.get("tags") or [],
         "downloads": data.get("downloads") or 0,
@@ -579,6 +667,9 @@ class QueueAddRequest(BaseModel):
     # Stored in the queue entry so approve can pass it to _run_download
     # without a second HF API round-trip.
     model_size_bytes: int = 0
+    # GGUF quantization pattern (e.g. "Q5_K_M"). When set, snapshot_download
+    # restricts to *{quant_pattern}*.gguf instead of fetching all variants.
+    quant_pattern: str | None = None
 
 
 @router.post("/queue", status_code=201)
@@ -597,6 +688,7 @@ def add_to_queue(req: QueueAddRequest) -> dict:
         "role": req.role,
         "service": req.service,
         "model_size_bytes": req.model_size_bytes,
+        "quant_pattern": req.quant_pattern,
         "status": "pending",
         "queued_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -629,6 +721,7 @@ def approve_queue_entry(entry_id: str) -> dict:
             entry.get("role"),
             entry.get("service"),
             entry.get("model_size_bytes", 0),
+            entry.get("quant_pattern"),
         ),
         daemon=True,
         name=f"model-download-{entry_id}",
@@ -636,6 +729,32 @@ def approve_queue_entry(entry_id: str) -> dict:
     thread.start()
 
     return {"ok": True}
+
+
+# ── PATCH /queue/{id} ─────────────────────────────────────────────────────────
+
+class QueuePatchRequest(BaseModel):
+    service: str | None = None
+    role: str | None = None
+
+
+@router.patch("/queue/{entry_id}")
+def patch_queue_entry(entry_id: str, body: QueuePatchRequest) -> dict:
+    """Update mutable fields (service, role) on a pending queue entry."""
+    entry = _get_queue_entry(entry_id)
+    if entry is None:
+        raise HTTPException(404, f"Queue entry {entry_id!r} not found")
+    if entry.get("status") != "pending":
+        raise HTTPException(409, f"Only pending entries can be patched (current: {entry.get('status')!r})")
+
+    updates: dict = {}
+    if body.service is not None:
+        updates["service"] = body.service
+    if body.role is not None:
+        updates["role"] = body.role
+
+    updated = _update_queue_entry(entry_id, updates)
+    return updated or {}
 
 
 # ── DELETE /queue/{id} ─────────────────────────────────────────────────────────

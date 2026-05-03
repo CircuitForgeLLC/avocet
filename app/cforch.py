@@ -17,8 +17,11 @@ import logging
 import os
 import re
 import subprocess as _subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
+
+import urllib.parse
 
 import yaml
 from fastapi import APIRouter, HTTPException
@@ -75,7 +78,29 @@ def _load_cforch_config() -> dict:
         "license_key":     _coalesce(file_cfg.get("license_key", ""),     "CF_LICENSE_KEY"),
         "ollama_url":      _coalesce(file_cfg.get("ollama_url", ""),       "OLLAMA_HOST"),
         "ollama_model":    _coalesce(file_cfg.get("ollama_model", ""),     "OLLAMA_MODEL"),
+        "judge_url":       _coalesce(file_cfg.get("judge_url", ""),        "CF_JUDGE_URL"),
+        "hf_token":        _coalesce(file_cfg.get("hf_token", ""),         "HF_TOKEN"),
     }
+
+
+def _validate_service_url(url: str, param_name: str) -> str:
+    """Validate that a URL is a well-formed http/https URL with a hostname.
+
+    Guards against SSRF: only http/https is allowed; the URL must have a
+    non-empty host. Does not enforce an allowlist — call sites are internal
+    tooling, not a public API.
+    """
+    if not url:
+        return url
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        raise HTTPException(400, f"{param_name}: not a valid URL")
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(400, f"{param_name}: URL must start with http:// or https://")
+    if not parsed.hostname:
+        raise HTTPException(400, f"{param_name}: URL has no hostname")
+    return url
 
 
 def _strip_ansi(text: str) -> str:
@@ -147,48 +172,141 @@ def get_tasks() -> dict:
 
 # ── GET /models ────────────────────────────────────────────────────────────────
 
+# Services and roles surfaced in the benchmark model picker.
+# Covers all cf-orch service types that benchmark.py can route tasks to.
+_BENCH_SERVICES = frozenset({
+    "cf-text", "vllm",         # LLM text generation
+    "cf-stt",                  # speech-to-text
+    "cf-tts",                  # text-to-speech
+    "cf-vision",               # image classification / embedding
+    "cf-voice",                # audio context classification
+})
+_BENCH_ROLES = frozenset({
+    "generator", "vlm",        # LLM roles
+    "stt", "alm",              # speech recognition
+    "tts",                     # speech synthesis
+    "vision", "embedding",     # image understanding
+    "classifier",              # audio classification (cf-voice)
+})
+
+
 @router.get("/models")
 def get_models() -> dict:
-    """Return model list from bench_models.yaml."""
+    """Return model list from bench_models.yaml merged with locally installed models.
+
+    bench_models.yaml entries are listed first and take precedence; any installed
+    model whose repo_id is already present in the YAML is skipped.  Only models
+    whose service is in _BENCH_SERVICES (cf-text, vllm, cf-stt, cf-tts, cf-vision,
+    cf-voice) are surfaced from the installed registry.
+    """
     cfg = _load_cforch_config()
     models_path = cfg.get("bench_models", "")
-    if not models_path:
-        return {"models": []}
 
-    p = Path(models_path)
-    if not p.exists():
-        return {"models": []}
-
-    try:
-        raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:
-        logger.warning("Failed to parse bench_models.yaml %s: %s", p, exc)
-        return {"models": []}
-
-    models_raw = raw.get("models", []) or []
     models: list[dict] = []
-    for m in models_raw:
-        if not isinstance(m, dict):
-            continue
-        models.append({
-            "name": m.get("name", ""),
-            "id": m.get("id", ""),
-            "service": m.get("service", "ollama"),
-            "tags": m.get("tags", []) or [],
-            "vram_estimate_mb": m.get("vram_estimate_mb", 0),
-        })
+    bench_ids: set[str] = set()
+
+    if models_path:
+        p = Path(models_path)
+        if p.exists():
+            try:
+                raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            except yaml.YAMLError as exc:
+                logger.warning("Failed to parse bench_models.yaml %s: %s", p, exc)
+                raw = {}
+            for m in (raw.get("models", []) or []):
+                if not isinstance(m, dict):
+                    continue
+                model_id = m.get("id", "")
+                models.append({
+                    "name": m.get("name", ""),
+                    "id": model_id,
+                    "service": m.get("service", "ollama"),
+                    "tags": m.get("tags", []) or [],
+                    "vram_estimate_mb": m.get("vram_estimate_mb", 0),
+                })
+                if model_id:
+                    bench_ids.add(model_id)
+
+    # Merge installed generator models not already in bench_models.yaml.
+    try:
+        from app.models import list_installed  # local import avoids circular dependency at module load
+        for installed in list_installed():
+            model_id: str = installed.get("model_id") or ""
+            service: str = installed.get("service") or ""
+            role: str = installed.get("role") or ""
+            if not model_id:
+                continue
+            if service not in _BENCH_SERVICES or role not in _BENCH_ROLES:
+                continue
+            if model_id in bench_ids:
+                continue
+            display_name = model_id.split("/", 1)[-1] if "/" in model_id else model_id
+            models.append({
+                "name": display_name,
+                "id": model_id,
+                "service": service,
+                "tags": [role],
+                "vram_estimate_mb": installed.get("vram_mb") or 0,
+            })
+            bench_ids.add(model_id)
+    except Exception as exc:
+        logger.warning("Could not merge installed models into model list: %s", exc)
 
     return {"models": models}
 
 
 # ── GET /run ───────────────────────────────────────────────────────────────────
 
+@router.get("/nodes")
+def get_nodes() -> dict:
+    """Proxy the coordinator's /api/nodes list, returning node_id + online status.
+
+    Online is inferred from last_heartbeat: any node with a recent heartbeat is online.
+    Returns an empty list if the coordinator is unreachable.
+    """
+    cfg = _load_cforch_config()
+    coordinator_url = cfg.get("coordinator_url", "").rstrip("/")
+    if not coordinator_url:
+        return {"nodes": []}
+    try:
+        import httpx as _httpx
+        resp = _httpx.get(f"{coordinator_url}/api/nodes", timeout=5.0)
+        resp.raise_for_status()
+        raw_nodes = resp.json().get("nodes", [])
+        return {
+            "nodes": [
+                {
+                    "node_id": n.get("node_id", ""),
+                    "online": n.get("last_heartbeat") is not None,
+                    "gpus": [
+                        {
+                            "gpu_id": g.get("gpu_id"),
+                            "name": g.get("name", ""),
+                            "vram_total_mb": g.get("vram_total_mb", 0),
+                            "vram_free_mb": g.get("vram_free_mb", 0),
+                        }
+                        for g in n.get("gpus", [])
+                    ],
+                }
+                for n in raw_nodes
+            ]
+        }
+    except Exception as exc:
+        logger.warning("Could not fetch nodes from coordinator: %s", exc)
+        return {"nodes": []}
+
+
 @router.get("/run")
 def run_benchmark(
     task_ids: str = "",
+    model_ids: str = "",
     model_tags: str = "",
     coordinator_url: str = "",
     ollama_url: str = "",
+    judge_url: str = "",
+    judge_backend: str = "chat",
+    workers: int = 1,
+    node_ids: str = "",
 ) -> StreamingResponse:
     """Spawn cf-orch benchmark.py and stream stdout as SSE progress events."""
     global _BENCH_RUNNING, _bench_proc
@@ -205,6 +323,13 @@ def run_benchmark(
     cfg_coordinator = cfg.get("coordinator_url", "")
     cfg_ollama      = cfg.get("ollama_url", "")
     cfg_license_key = cfg.get("license_key", "")
+    cfg_judge_url   = cfg.get("judge_url", "")
+
+    # Validate URL params before spawning the subprocess.
+    # _validate_service_url raises HTTPException on bad input (caught by FastAPI before streaming starts).
+    _validate_service_url(coordinator_url, "coordinator_url")
+    _validate_service_url(ollama_url, "ollama_url")
+    _validate_service_url(judge_url, "judge_url")
 
     def generate():
         global _BENCH_RUNNING, _bench_proc
@@ -213,16 +338,68 @@ def run_benchmark(
             yield f"data: {json.dumps({'type': 'error', 'message': 'bench_script not configured or not found'})}\n\n"
             return
 
+        # Build effective models file: bench_models.yaml + any installed models
+        # whose IDs were selected but are absent from the YAML (e.g. downloaded
+        # via the Models view). Written to a temp file so benchmark.py sees one
+        # unified list; cleaned up in the finally block.
+        effective_models_file = bench_models
+        _tmp_models_path: str | None = None
+
+        if model_ids and bench_models and Path(bench_models).exists():
+            requested_ids = set(model_ids.split(","))
+            try:
+                raw_bench = yaml.safe_load(Path(bench_models).read_text(encoding="utf-8")) or {}
+                bench_entries: list[dict] = raw_bench.get("models", []) or []
+                bench_id_set = {m.get("id", "") for m in bench_entries if isinstance(m, dict)}
+                missing_ids = requested_ids - bench_id_set
+                if missing_ids:
+                    from app.models import list_installed
+                    installed_map = {
+                        m["model_id"]: m
+                        for m in list_installed()
+                        if m.get("model_id") and m.get("service") in _BENCH_SERVICES
+                    }
+                    extra: list[dict] = []
+                    for mid in missing_ids:
+                        if mid in installed_map:
+                            inst = installed_map[mid]
+                            entry: dict[str, Any] = {
+                                "id": mid,
+                                "name": mid.split("/", 1)[-1] if "/" in mid else mid,
+                                "service": inst.get("service", "cf-text"),
+                                "vram_estimate_mb": inst.get("vram_mb") or 0,
+                                "tags": [inst.get("role", "generator")],
+                                "temperature": 0.0,
+                            }
+                            local_path = inst.get("path", "") or inst.get("local_path", "")
+                            if local_path:
+                                entry["model_path"] = local_path
+                            extra.append(entry)
+                    if extra:
+                        merged = {"models": bench_entries + extra}
+                        tf = tempfile.NamedTemporaryFile(
+                            mode="w", suffix=".yaml", delete=False,
+                            prefix="avocet_bench_models_",
+                        )
+                        yaml.dump(merged, tf)
+                        tf.close()
+                        _tmp_models_path = tf.name
+                        effective_models_file = _tmp_models_path
+            except Exception as exc:
+                logger.warning("Could not merge installed models into temp bench file: %s", exc)
+
         cmd = [
             python_bin,
             bench_script,
             "--tasks", bench_tasks,
-            "--models", bench_models,
+            "--models", effective_models_file,
             "--output", results_dir,
         ]
 
         if task_ids:
             cmd.extend(["--filter-tasks"] + task_ids.split(","))
+        if model_ids:
+            cmd.extend(["--filter-models"] + model_ids.split(","))
         if model_tags:
             cmd.extend(["--filter-tags"] + model_tags.split(","))
 
@@ -233,6 +410,15 @@ def run_benchmark(
             cmd.extend(["--coordinator", effective_coordinator])
         if effective_ollama:
             cmd.extend(["--ollama-url", effective_ollama])
+        effective_judge = judge_url if judge_url else cfg_judge_url
+        if effective_judge:
+            cmd.extend(["--judge-url", effective_judge])
+        if judge_backend and judge_backend != "chat":
+            cmd.extend(["--judge-backend", judge_backend])
+        if workers > 1:
+            cmd.extend(["--workers", str(workers)])
+        if node_ids:
+            cmd.extend(["--nodes"] + node_ids.split(","))
 
         # Pass license key as env var so subprocess can authenticate with cf-orch
         proc_env = {**os.environ}
@@ -273,6 +459,11 @@ def run_benchmark(
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
         finally:
             _BENCH_RUNNING = False
+            if _tmp_models_path:
+                try:
+                    os.unlink(_tmp_models_path)
+                except OSError:
+                    pass
 
     return StreamingResponse(
         generate(),
@@ -295,6 +486,7 @@ def get_cforch_config() -> dict:
         "coordinator_url": cfg.get("coordinator_url", ""),
         "ollama_url":      cfg.get("ollama_url", ""),
         "ollama_model":    cfg.get("ollama_model", ""),
+        "judge_url":       cfg.get("judge_url", ""),
         "license_key_set": bool(cfg.get("license_key", "")),
         "source": "env" if not _config_file().exists() else "yaml+env",
     }
@@ -303,7 +495,7 @@ def get_cforch_config() -> dict:
 # ── GET /results ───────────────────────────────────────────────────────────────
 
 @router.get("/results")
-def get_results() -> dict:
+def get_results() -> list:
     """Return the latest benchmark summary.json from results_dir."""
     cfg = _load_cforch_config()
     results_dir = cfg.get("results_dir", "")

@@ -541,3 +541,84 @@ def test_delete_installed_name_with_slash_blocked(client):
         except _HTTPException as exc:
             assert exc.status_code in (400, 404)
             raise
+
+
+# ── Catalog registration ───────────────────────────────────────────────────────
+
+_MINIMAL_YAML = """\
+services:
+  cf-text:
+    max_mb: {max_mb}
+    catalog:
+      existing-model:
+        path: /some/path
+        vram_mb: 1000
+        description: "placeholder"
+"""
+
+
+def _make_node_yaml(tmp_path: Path, max_mb: int = 8192) -> Path:
+    p = tmp_path / "testnode.yaml"
+    p.write_text(_MINIMAL_YAML.format(max_mb=max_mb), encoding="utf-8")
+    return p
+
+
+def test_catalog_registration_fp16_no_env_block(tmp_path):
+    """When model fits at FP16, no env block should be written."""
+    from app import models as models_module
+
+    node_yaml = _make_node_yaml(tmp_path, max_mb=8192)
+    with patch.object(models_module, "_CF_ORCH_PROFILES_DIR", tmp_path):
+        updated = models_module._register_in_node_catalogs(
+            repo_id="org/SmallModel",
+            local_path=tmp_path / "org--SmallModel",
+            vram_mb_fp16=4000,
+            role="generator",
+        )
+
+    assert "testnode" in updated
+    content = node_yaml.read_text()
+    # _catalog_key strips org prefix and lowercases: "org/SmallModel" → "smallmodel"
+    assert "smallmodel:" in content
+    assert "CF_TEXT_4BIT" not in content
+    assert "env:" not in content
+
+
+def test_catalog_registration_needs_4bit_writes_env_block(tmp_path):
+    """When model only fits at 4-bit, env: CF_TEXT_4BIT: '1' must be written."""
+    from app import models as models_module
+
+    node_yaml = _make_node_yaml(tmp_path, max_mb=8192)
+    with patch.object(models_module, "_CF_ORCH_PROFILES_DIR", tmp_path):
+        updated = models_module._register_in_node_catalogs(
+            repo_id="org/BigModel",
+            local_path=tmp_path / "org--BigModel",
+            vram_mb_fp16=20000,  # won't fit at FP16 on 8 GB
+            role="generator",
+        )
+
+    assert "testnode" in updated
+    content = node_yaml.read_text()
+    # _catalog_key: "org/BigModel" → "bigmodel"
+    assert "bigmodel:" in content
+    assert "env:" in content
+    assert 'CF_TEXT_4BIT: "1"' in content
+    assert "CF_TEXT_4BIT=1 required" in content  # description note
+
+
+def test_catalog_registration_too_large_skipped(tmp_path):
+    """Model too large even at 4-bit should not be registered."""
+    from app import models as models_module
+
+    node_yaml = _make_node_yaml(tmp_path, max_mb=8192)
+    with patch.object(models_module, "_CF_ORCH_PROFILES_DIR", tmp_path):
+        updated = models_module._register_in_node_catalogs(
+            repo_id="org/HugeModel",
+            local_path=tmp_path / "org--HugeModel",
+            vram_mb_fp16=80000,  # 4-bit ~22 GB, still won't fit on 8 GB
+            role="generator",
+        )
+
+    assert updated == []
+    content = node_yaml.read_text()
+    assert "hugemodel" not in content

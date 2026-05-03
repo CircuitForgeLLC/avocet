@@ -6,6 +6,8 @@
       <summary class="picker-summary">
         <span class="picker-title">📋 Task Selection</span>
         <span class="picker-badge">{{ llmTaskBadge }}</span>
+        <button class="picker-bulk-btn" @click.stop.prevent="selectAllTasks()">All</button>
+        <button class="picker-bulk-btn" @click.stop.prevent="clearAllTasks()">None</button>
       </summary>
       <div class="picker-body">
         <div v-if="llmTasksLoading" class="picker-loading">Loading tasks…</div>
@@ -44,6 +46,8 @@
       <summary class="picker-summary">
         <span class="picker-title">🎯 Model Selection</span>
         <span class="picker-badge">{{ llmModelBadge }}</span>
+        <button class="picker-bulk-btn" @click.stop.prevent="selectAllModels()">All</button>
+        <button class="picker-bulk-btn" @click.stop.prevent="clearAllModels()">None</button>
       </summary>
       <div class="picker-body">
         <div v-if="llmModelsLoading" class="picker-loading">Loading models…</div>
@@ -78,6 +82,33 @@
       </div>
     </details>
 
+    <!-- Node Selection -->
+    <div class="node-picker" v-if="llmNodes.length > 0">
+      <span class="node-picker-label">Nodes:</span>
+      <label
+        v-for="node in llmNodes"
+        :key="node.node_id"
+        class="node-chip"
+        :class="{ 'node-chip--off': !enabledNodes.has(node.node_id), 'node-chip--offline': !node.online }"
+        :title="node.online ? `${node.node_id} — ${node.gpus.length} GPU(s)` : `${node.node_id} — offline`"
+      >
+        <input
+          type="checkbox"
+          class="node-chip-check"
+          :checked="enabledNodes.has(node.node_id)"
+          :disabled="!node.online || llmRunning"
+          @change="toggleNode(node.node_id, ($event.target as HTMLInputElement).checked)"
+        />
+        {{ node.node_id }}
+        <span class="node-chip-status" v-if="!node.online">offline</span>
+      </label>
+      <span class="node-picker-hint">
+        {{ enabledNodeIds.length === llmNodes.filter(n => n.online).length
+            ? 'auto-routing (all nodes)'
+            : `restricted to: ${enabledNodeIds.join(', ')}` }}
+      </span>
+    </div>
+
     <!-- Run Controls -->
     <div class="run-controls">
       <button
@@ -88,6 +119,24 @@
         {{ llmRunning ? '⏳ Running…' : '▶ Run LLM Eval' }}
       </button>
       <button v-if="llmRunning" class="btn-cancel" @click="cancelLlmBenchmark">✕ Cancel</button>
+      <input
+        v-model="llmJudgeUrl"
+        class="judge-url-input"
+        placeholder="Judge URL — leave empty to skip LLM judge scoring"
+        :disabled="llmRunning"
+        title="Optional: URL of a running cf-text service (e.g. http://10.1.10.158:8008). When set, each LLM response gets a secondary score from the judge model — adds a 'judge' column to results. Empty = primary quality scoring only."
+      />
+      <label class="workers-label" title="Run this many models concurrently (requires multiple GPUs)">
+        <span class="workers-prefix">workers</span>
+        <input
+          v-model.number="llmWorkers"
+          type="number"
+          min="1"
+          max="8"
+          class="workers-input"
+          :disabled="llmRunning"
+        />
+      </label>
       <span v-if="selectedLlmTasks.size === 0 || selectedLlmModels.size === 0" class="run-hint">
         Select at least one task and one model to run.
       </span>
@@ -119,6 +168,7 @@
             <tr>
               <th class="hm-label-col">Model</th>
               <th class="hm-model-col">overall</th>
+              <th v-if="llmHasJudge" class="hm-model-col hm-judge-col">judge</th>
               <th v-for="col in llmTaskTypeCols" :key="col" class="hm-model-col">{{ col }}</th>
               <th class="hm-model-col">tok/s</th>
             </tr>
@@ -130,6 +180,12 @@
                 class="hm-value-cell"
                 :class="{ 'bt-best': llmBestByCol['overall'] === row.model_id }"
               >{{ pct(row.avg_quality_score) }}</td>
+              <td
+                v-if="llmHasJudge"
+                class="hm-value-cell hm-judge-cell"
+                :class="{ 'bt-best': llmBestByCol['judge'] === row.model_id }"
+                title="LLM-as-judge secondary score"
+              >{{ row.avg_judge_score != null ? pct(row.avg_judge_score) : '—' }}</td>
               <td
                 v-for="col in llmTaskTypeCols"
                 :key="col"
@@ -168,6 +224,12 @@ interface CfOrchModel {
   vram_estimate_mb?: number
 }
 
+interface CfOrchNode {
+  node_id: string
+  online: boolean
+  gpus: { gpu_id: number; name: string; vram_total_mb: number; vram_free_mb: number }[]
+}
+
 interface LlmModelResult {
   model_name: string
   model_id: string
@@ -175,9 +237,11 @@ interface LlmModelResult {
   avg_tokens_per_sec: number
   avg_completion_ms: number
   avg_quality_score: number
+  avg_judge_score: number | null
   finetune_candidates: number
   error_count: number
   quality_by_task_type: Record<string, number>
+  judge_score_by_task_type?: Record<string, number>
 }
 
 // ── State ───────────────────────────────────────────────────────────────────
@@ -195,6 +259,10 @@ const llmError       = ref('')
 const llmResults     = ref<LlmModelResult[]>([])
 const llmEventSource = ref<EventSource | null>(null)
 const llmLogEl       = ref<HTMLElement | null>(null)
+const llmJudgeUrl    = ref('')
+const llmWorkers     = ref(1)
+const llmNodes       = ref<CfOrchNode[]>([])
+const enabledNodes   = ref<Set<string>>(new Set())
 
 // ── Computed ────────────────────────────────────────────────────────────────
 const llmTasksByType = computed((): Record<string, CfOrchTask[]> => {
@@ -239,6 +307,14 @@ const llmTaskTypeCols = computed(() => {
   return [...types].sort()
 })
 
+const llmHasJudge = computed(() =>
+  llmResults.value.some(r => r.avg_judge_score != null)
+)
+
+const enabledNodeIds = computed(() =>
+  llmNodes.value.filter(n => n.online && enabledNodes.value.has(n.node_id)).map(n => n.node_id)
+)
+
 const llmBestByCol = computed((): Record<string, string> => {
   const best: Record<string, string> = {}
   if (llmResults.value.length === 0) return best
@@ -248,6 +324,16 @@ const llmBestByCol = computed((): Record<string, string> => {
     if (r.avg_quality_score > bestVal) { bestVal = r.avg_quality_score; bestId = r.model_id }
   }
   best['overall'] = bestId
+
+  if (llmHasJudge.value) {
+    bestId = ''; bestVal = -Infinity
+    for (const r of llmResults.value) {
+      if (r.avg_judge_score != null && r.avg_judge_score > bestVal) {
+        bestVal = r.avg_judge_score; bestId = r.model_id
+      }
+    }
+    best['judge'] = bestId
+  }
 
   for (const col of llmTaskTypeCols.value) {
     bestId = ''; bestVal = -Infinity
@@ -306,6 +392,15 @@ function toggleService(models: CfOrchModel[], checked: boolean) {
   }
   selectedLlmModels.value = next
 }
+function selectAllTasks()  { selectedLlmTasks.value  = new Set(llmTasks.value.map(t => t.id)) }
+function clearAllTasks()   { selectedLlmTasks.value  = new Set() }
+function selectAllModels() { selectedLlmModels.value = new Set(llmModels.value.map(m => m.id)) }
+function clearAllModels()  { selectedLlmModels.value = new Set() }
+function toggleNode(id: string, checked: boolean) {
+  const next = new Set(enabledNodes.value)
+  checked ? next.add(id) : next.delete(id)
+  enabledNodes.value = next
+}
 
 // ── Data loaders ─────────────────────────────────────────────────────────────
 async function loadLlmTasks() {
@@ -335,6 +430,21 @@ async function loadLlmResults() {
   }
 }
 
+async function loadLlmConfig() {
+  const { data } = await useApiFetch<{ judge_url?: string }>('/api/cforch/config')
+  if (data?.judge_url && !llmJudgeUrl.value) {
+    llmJudgeUrl.value = data.judge_url
+  }
+}
+
+async function loadLlmNodes() {
+  const { data } = await useApiFetch<{ nodes: CfOrchNode[] }>('/api/cforch/nodes')
+  if (data?.nodes) {
+    llmNodes.value = data.nodes
+    enabledNodes.value = new Set(data.nodes.filter(n => n.online).map(n => n.node_id))
+  }
+}
+
 // ── Run / cancel ──────────────────────────────────────────────────────────────
 function startLlmBenchmark() {
   llmRunning.value = true
@@ -344,6 +454,15 @@ function startLlmBenchmark() {
   const params = new URLSearchParams()
   const taskIds = [...selectedLlmTasks.value].join(',')
   if (taskIds) params.set('task_ids', taskIds)
+  const modelIds = [...selectedLlmModels.value].join(',')
+  if (modelIds) params.set('model_ids', modelIds)
+  if (llmJudgeUrl.value.trim()) params.set('judge_url', llmJudgeUrl.value.trim())
+  if (llmWorkers.value > 1) params.set('workers', String(llmWorkers.value))
+  const onlineNodeIds = llmNodes.value.filter(n => n.online).map(n => n.node_id)
+  const isRestricted = enabledNodeIds.value.length < onlineNodeIds.length
+  if (isRestricted && enabledNodeIds.value.length > 0) {
+    params.set('node_ids', enabledNodeIds.value.join(','))
+  }
 
   const es = new EventSource(`/api/cforch/run?${params}`)
   llmEventSource.value = es
@@ -387,6 +506,8 @@ onMounted(() => {
   loadLlmTasks()
   loadLlmModels()
   loadLlmResults()
+  loadLlmConfig()
+  loadLlmNodes()
 })
 </script>
 
@@ -450,6 +571,43 @@ onMounted(() => {
   font-size: 0.8rem;
   color: var(--color-text-secondary, #6b7a99);
 }
+
+.judge-url-input {
+  flex: 1;
+  min-width: 14rem;
+  max-width: 24rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.375rem;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #1a2338);
+  font-size: 0.8rem;
+  font-family: var(--font-mono, monospace);
+}
+.judge-url-input:disabled { opacity: 0.5; }
+.judge-url-input::placeholder { color: var(--color-text-secondary, #6b7a99); }
+
+.workers-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary, #6b7a99);
+  white-space: nowrap;
+}
+.workers-prefix { font-family: var(--font-mono, monospace); }
+.workers-input {
+  width: 3.2rem;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.375rem;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #1a2338);
+  font-size: 0.8rem;
+  font-family: var(--font-mono, monospace);
+  text-align: center;
+}
+.workers-input:disabled { opacity: 0.5; }
 
 /* ── Run log ────────────────────────────────────────────── */
 .run-log {
@@ -592,6 +750,15 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+.hm-judge-col {
+  background: color-mix(in srgb, var(--color-surface-raised, #e4ebf5) 80%, #c6d5f5);
+}
+.hm-judge-cell {
+  background: color-mix(in srgb, var(--color-surface, #fff) 85%, #c6d5f5);
+  font-style: italic;
+  opacity: 0.9;
+}
+
 /* ── Model Picker ───────────────────────────────────────── */
 .model-picker {
   border: 1px solid var(--color-border, #d0d7e8);
@@ -628,6 +795,24 @@ details[open] .picker-summary::before { content: '▼  '; }
   border-radius: 1rem;
   font-family: var(--font-mono, monospace);
   margin-left: auto;
+}
+
+.picker-bulk-btn {
+  padding: 0.1rem 0.45rem;
+  font-size: 0.7rem;
+  font-family: var(--font-mono, monospace);
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.25rem;
+  color: var(--color-text-secondary, #6b7a99);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+.picker-bulk-btn:hover {
+  background: var(--app-primary, #2A6080);
+  color: #fff;
+  border-color: var(--app-primary, #2A6080);
 }
 
 .picker-body {
@@ -711,5 +896,62 @@ details[open] .picker-summary::before { content: '▼  '; }
 @media (max-width: 600px) {
   .picker-model-list { padding-left: 0; }
   .picker-model-name { max-width: 14ch; }
+}
+
+/* ── Node picker ────────────────────────────────────── */
+.node-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.5rem;
+  background: var(--color-surface-raised, #e4ebf5);
+}
+
+.node-picker-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #6b7a99);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.node-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 1rem;
+  background: var(--color-surface, #fff);
+  font-size: 0.78rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text, #1a2338);
+  cursor: pointer;
+  transition: background 0.12s, opacity 0.12s;
+}
+.node-chip--off {
+  opacity: 0.45;
+  background: transparent;
+}
+.node-chip--offline {
+  opacity: 0.35;
+  cursor: not-allowed;
+  font-style: italic;
+}
+.node-chip-check { accent-color: var(--app-primary, #2A6080); }
+.node-chip-status {
+  font-size: 0.66rem;
+  color: var(--color-text-secondary, #6b7a99);
+}
+
+.node-picker-hint {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary, #6b7a99);
+  font-family: var(--font-mono, monospace);
+  margin-left: auto;
 }
 </style>

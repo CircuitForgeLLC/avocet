@@ -90,6 +90,12 @@ usage() {
     echo -e "    ${GREEN}score [args]${NC}             Shortcut: --score [args]"
     echo -e "    ${GREEN}compare [args]${NC}           Shortcut: --compare [args]"
     echo ""
+    echo "  Planning Benchmark:"
+    echo -e "    ${GREEN}plans-bench [args]${NC}       Run benchmark_plans.py (args passed through)"
+    echo -e "    ${GREEN}plans-list${NC}               Shortcut: --list-models"
+    echo -e "    ${GREEN}plans-run <model> [args]${NC} Run a single model (--verbose auto-added)"
+    echo -e "    ${GREEN}plans-compare <m1> <m2> [more]${NC}  Compare models side-by-side"
+    echo ""
     echo "  Writing Style Benchmark:"
     echo -e "    ${GREEN}style-bench [args]${NC}       Run benchmark_style.py (args passed through)"
     echo -e "    ${GREEN}style-list${NC}               List available ollama models for style bench"
@@ -127,6 +133,8 @@ case "$CMD" in
         fi
         mkdir -p "$LOG_DIR"
         API_LOG="${LOG_DIR}/api.log"
+        # Load .env if present — sets HF_TOKEN and other optional overrides.
+        [[ -f .env ]] && set -a && source .env && set +a
         info "Building Vue SPA…"
         (cd web && npm run build) >> "$API_LOG" 2>&1
         info "Starting FastAPI on port ${API_PORT}…"
@@ -178,6 +186,9 @@ case "$CMD" in
         DEV_API_PID_FILE=".avocet-dev-api.pid"
         mkdir -p "$LOG_DIR"
         DEV_API_LOG="${LOG_DIR}/dev-api.log"
+
+        # Load .env if present — sets HF_TOKEN and other optional overrides.
+        [[ -f .env ]] && set -a && source .env && set +a
 
         if [[ -f "$DEV_API_PID_FILE" ]] && kill -0 "$(<"$DEV_API_PID_FILE")" 2>/dev/null; then
             warn "Dev API already running (PID $(<"$DEV_API_PID_FILE"))"
@@ -253,6 +264,30 @@ case "$CMD" in
 
     compare)
         exec "$0" benchmark --compare "$@"
+        ;;
+
+    plans-bench)
+        info "Running planning benchmark (${ENV_UI})…"
+        "$PYTHON_UI" scripts/benchmark_plans.py "$@"
+        ;;
+
+    plans-list)
+        exec "$0" plans-bench --list-models
+        ;;
+
+    plans-run)
+        if [[ $# -lt 1 ]]; then
+            error "Usage: ./manage.sh plans-run <model-key> [extra args]"
+        fi
+        MODEL="$1"; shift
+        exec "$0" plans-bench --model "$MODEL" --verbose "$@"
+        ;;
+
+    plans-compare)
+        if [[ $# -lt 2 ]]; then
+            error "Usage: ./manage.sh plans-compare <model1> <model2> [more…]"
+        fi
+        exec "$0" plans-bench --compare "$@" --verbose
         ;;
 
     style-bench)

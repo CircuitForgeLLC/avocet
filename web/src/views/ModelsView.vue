@@ -51,8 +51,31 @@
           <span v-if="lookupResult.adapter_recommendation" class="chip chip-adapter">
             {{ lookupResult.adapter_recommendation }}
           </span>
-          <span v-if="lookupResult.size != null" class="preview-size">
-            {{ humanBytes(lookupResult.size) }}
+          <span v-if="selectedQuantSize > 0" class="preview-size">
+            {{ humanBytes(selectedQuantSize) }}
+          </span>
+        </div>
+
+        <!-- GGUF quantization picker — only shown for GGUF repos -->
+        <div v-if="lookupResult.gguf_files?.length" class="quant-picker">
+          <label class="quant-label" for="quant-select">Quantization</label>
+          <select
+            id="quant-select"
+            v-model="selectedQuant"
+            class="quant-select"
+            aria-label="Select quantization variant"
+          >
+            <option :value="null" disabled>Select quantization…</option>
+            <option
+              v-for="f in lookupResult.gguf_files"
+              :key="f.filename"
+              :value="f.quant_name ?? f.filename"
+            >
+              {{ f.quant_name ?? f.filename }} — {{ humanBytes(f.size) }}
+            </option>
+          </select>
+          <span class="quant-hint">
+            Q5_K_M or Q6_K recommended for 8 GB GPUs. Q8_0 for max quality.
           </span>
         </div>
 
@@ -67,7 +90,7 @@
 
         <button
           class="btn-primary btn-add-queue"
-          :disabled="lookupResult.already_installed || lookupResult.already_queued || addingToQueue"
+          :disabled="!canAddToQueue"
           @click="addToQueue"
         >
           {{ addingToQueue ? 'Adding…' : 'Add to queue' }}
@@ -99,9 +122,39 @@
           <span v-if="model.role"                  class="chip chip-role">{{ model.role }}</span>
           <span v-if="model.service"               class="chip" :class="serviceChipClass(model.service)">{{ model.service }}</span>
           <span v-if="model.adapter_recommendation" class="chip chip-adapter">{{ model.adapter_recommendation }}</span>
+          <span v-if="model.quant_pattern"          class="chip chip-quant">{{ model.quant_pattern }}</span>
+        </div>
+        <!-- Allow manual service/role assignment for unrecognized pipeline tags -->
+        <div v-if="!model.service" class="classify-row queue-classify">
+          <select
+            class="classify-select"
+            :value="classifyDraft[model.id]?.service ?? ''"
+            @change="onServiceChange(model.id, ($event.target as HTMLSelectElement).value)"
+            aria-label="Assign service"
+          >
+            <option value="" disabled>Service…</option>
+            <option v-for="svc in CLASSIFIABLE_SERVICES" :key="svc.value" :value="svc.value">{{ svc.label }}</option>
+          </select>
+          <select
+            class="classify-select"
+            :value="classifyDraft[model.id]?.role ?? ''"
+            :disabled="!classifyDraft[model.id]?.service"
+            @change="(e) => setClassifyRole(model.id, (e.target as HTMLSelectElement).value)"
+            aria-label="Assign role"
+          >
+            <option value="" disabled>Role…</option>
+            <option
+              v-for="role in rolesForService(classifyDraft[model.id]?.service ?? '')"
+              :key="role"
+              :value="role"
+            >{{ role }}</option>
+          </select>
         </div>
         <div class="model-card-actions">
-          <button class="btn-primary btn-sm" @click="approveModel(model.id)">
+          <button
+            class="btn-primary btn-sm"
+            @click="approveModel(model.id, classifyDraft[model.id])"
+          >
             Approve download
           </button>
         </div>
@@ -252,6 +305,12 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 // ── Type definitions ──────────────────────────────────
 
+interface GgufFile {
+  filename: string
+  size: number
+  quant_name: string | null
+}
+
 interface LookupResult {
   repo_id: string
   pipeline_tag: string | null
@@ -260,7 +319,8 @@ interface LookupResult {
   service: string | null
   compatible: boolean
   warning: string | null
-  size: number | null
+  model_size_bytes: number
+  gguf_files: GgufFile[] | null
   description: string | null
   already_installed: boolean
   already_queued: boolean
@@ -274,6 +334,7 @@ interface QueuedModel {
   adapter_recommendation: string | null
   role: string | null
   service: string | null
+  quant_pattern: string | null
 }
 
 interface InstalledModel {
@@ -302,6 +363,26 @@ const lookupLoading = ref(false)
 const lookupError   = ref<string | null>(null)
 const lookupResult  = ref<LookupResult | null>(null)
 const addingToQueue = ref(false)
+const selectedQuant = ref<string | null>(null)
+
+// Size of the selected GGUF file, or total model size for non-GGUF repos.
+const selectedQuantSize = computed<number>(() => {
+  const r = lookupResult.value
+  if (!r) return 0
+  if (r.gguf_files?.length && selectedQuant.value) {
+    const f = r.gguf_files.find(f => (f.quant_name ?? f.filename) === selectedQuant.value)
+    return f?.size ?? r.model_size_bytes
+  }
+  return r.model_size_bytes
+})
+
+// Disable "Add to queue" when a GGUF repo but no quant chosen yet.
+const canAddToQueue = computed(() => {
+  const r = lookupResult.value
+  if (!r || r.already_installed || r.already_queued || addingToQueue.value) return false
+  if (r.gguf_files?.length && !selectedQuant.value) return false
+  return true
+})
 
 const queuedModels    = ref<QueuedModel[]>([])
 const installedModels = ref<InstalledModel[]>([])
@@ -411,6 +492,7 @@ async function doLookup() {
   lookupLoading.value = true
   lookupError.value   = null
   lookupResult.value  = null
+  selectedQuant.value = null
 
   try {
     const res = await fetch(`/api/models/lookup?repo_id=${encodeURIComponent(repoId)}`)
@@ -442,7 +524,15 @@ async function addToQueue() {
     const res = await fetch('/api/models/queue', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repo_id, pipeline_tag, adapter_recommendation, role, service }),
+      body: JSON.stringify({
+        repo_id,
+        pipeline_tag,
+        adapter_recommendation,
+        role,
+        service,
+        model_size_bytes: selectedQuantSize.value,
+        quant_pattern: selectedQuant.value,
+      }),
     })
     if (res.ok) {
       lookupResult.value = { ...lookupResult.value, already_queued: true }
@@ -454,8 +544,16 @@ async function addToQueue() {
   }
 }
 
-async function approveModel(id: string) {
+async function approveModel(id: string, draft?: { service: string; role: string }) {
   try {
+    // If the user picked a service/role for an unrecognized model, patch it first.
+    if (draft?.service && draft?.role) {
+      await fetch(`/api/models/queue/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service: draft.service, role: draft.role }),
+      })
+    }
     const res = await fetch(`/api/models/queue/${encodeURIComponent(id)}/approve`, { method: 'POST' })
     if (res.ok) {
       await loadQueue()
@@ -772,6 +870,44 @@ onUnmounted(() => {
 
 .btn-add-queue {
   align-self: flex-start;
+}
+
+/* ── Quant picker ── */
+.quant-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.quant-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #4a5c7a);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.quant-select {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-border, #a8b8d0);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--color-surface, #f0f4fb);
+  color: var(--color-text, #1a2338);
+  font-size: 0.9rem;
+  font-family: var(--font-mono, monospace);
+  cursor: pointer;
+}
+
+.quant-hint {
+  font-size: 0.78rem;
+  color: var(--color-text-muted, #4a5c7a);
+}
+
+.chip-quant {
+  background: color-mix(in srgb, var(--color-primary, #2A6080) 15%, transparent);
+  color: var(--color-primary, #2A6080);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
 }
 
 /* ── Model cards (queue + downloads) ── */

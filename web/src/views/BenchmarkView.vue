@@ -21,21 +21,28 @@
         :class="{ active: benchMode === 'style' }"
         @click="benchMode = 'style'"
       >✍️ Writing Style</button>
+      <button
+        class="mode-btn"
+        :class="{ active: benchMode === 'plans' }"
+        @click="benchMode = 'plans'"
+      >📐 Planning</button>
     </div>
 
-    <ClassifierTab v-if="benchMode === 'classifier'" />
-    <LlmEvalTab   v-if="benchMode === 'llm'" />
-    <StyleTab     v-if="benchMode === 'style'" />
+    <ClassifierTab  v-if="benchMode === 'classifier'" />
+    <LlmEvalTab     v-if="benchMode === 'llm'" />
+    <StyleTab       v-if="benchMode === 'style'" />
+    <PlansBenchTab  v-if="benchMode === 'plans'" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import ClassifierTab from './ClassifierTab.vue'
-import LlmEvalTab   from './LlmEvalTab.vue'
-import StyleTab     from './StyleTab.vue'
+import ClassifierTab  from './ClassifierTab.vue'
+import LlmEvalTab     from './LlmEvalTab.vue'
+import StyleTab       from './StyleTab.vue'
+import PlansBenchTab  from './PlansBenchTab.vue'
 
-type BenchMode = 'classifier' | 'llm' | 'style'
+type BenchMode = 'classifier' | 'llm' | 'style' | 'plans'
 const benchMode = ref<BenchMode>('classifier')
 </script>
 

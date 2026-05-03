@@ -14,7 +14,9 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(autouse=True)
 def reset_cforch_globals(tmp_path):
-    """Redirect _CONFIG_DIR to tmp_path and reset running-state globals."""
+    """Redirect _CONFIG_DIR to tmp_path, reset running-state globals, and stub
+    list_installed to return [] so real disk model directories don't bleed into
+    tests that don't exercise the installed-model merge path."""
     from app import cforch as cforch_module
 
     prev_config_dir = cforch_module._CONFIG_DIR
@@ -25,7 +27,8 @@ def reset_cforch_globals(tmp_path):
     cforch_module._BENCH_RUNNING = False
     cforch_module._bench_proc = None
 
-    yield tmp_path
+    with patch("app.models.list_installed", return_value=[]):
+        yield tmp_path
 
     cforch_module.set_config_dir(prev_config_dir)
     cforch_module._BENCH_RUNNING = prev_running
@@ -139,6 +142,35 @@ def test_models_parses_bench_models_yaml(client, config_dir, tmp_path):
     assert m["service"] == "ollama"
     assert m["tags"] == ["fast", "small"]
     assert m["vram_estimate_mb"] == 6000
+
+
+def test_models_merges_installed_generators(client, config_dir, tmp_path):
+    """Installed cf-text/vllm generator models appear in the model list,
+    deduplicated against bench_models.yaml entries."""
+    models_file = tmp_path / "bench_models.yaml"
+    _write_models_yaml(models_file, [
+        {"name": "llama3", "id": "llama3:8b", "service": "ollama", "tags": [], "vram_estimate_mb": 6000},
+        {"name": "already-there", "id": "ibm-granite/granite-4.1-8b", "service": "cf-text", "tags": [], "vram_estimate_mb": 8000},
+    ])
+    _write_config(config_dir, {"bench_models": str(models_file)})
+
+    fake_installed = [
+        # should be included — cf-text generator not already in YAML
+        {"model_id": "meta-llama/Llama-3.1-8B", "service": "cf-text", "role": "generator", "vram_mb": 16000},
+        # should be deduped — repo_id matches a YAML entry
+        {"model_id": "ibm-granite/granite-4.1-8b", "service": "cf-text", "role": "generator", "vram_mb": 8000},
+        # should be excluded — classifier, not a generator
+        {"model_id": "cross-encoder/ms-marco-MiniLM-L6", "service": "avocet", "role": "reranker", "vram_mb": 500},
+    ]
+    with patch("app.models.list_installed", return_value=fake_installed):
+        r = client.get("/api/cforch/models")
+    assert r.status_code == 200
+    ids = [m["id"] for m in r.json()["models"]]
+    assert "llama3:8b" in ids                           # from YAML
+    assert "ibm-granite/granite-4.1-8b" in ids          # from YAML (not duplicated)
+    assert "meta-llama/Llama-3.1-8B" in ids             # merged from installed
+    assert "cross-encoder/ms-marco-MiniLM-L6" not in ids  # filtered out (reranker)
+    assert ids.count("ibm-granite/granite-4.1-8b") == 1  # no duplicate
 
 
 # ── GET /run ───────────────────────────────────────────────────────────────────

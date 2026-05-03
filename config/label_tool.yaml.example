@@ -41,11 +41,15 @@ cforch:
   # Python interpreter with cf-orch installed
   python_bin:   /devl/miniconda3/envs/cf/bin/python
 
-  # Connection config — override env vars CF_ORCH_URL / CF_LICENSE_KEY / OLLAMA_HOST
+  # Connection config — override env vars CF_ORCH_URL / CF_LICENSE_KEY / OLLAMA_HOST / CF_JUDGE_URL / HF_TOKEN
   # coordinator_url: http://localhost:7700
   # license_key:     CFG-AVCT-xxxx-xxxx-xxxx
   # ollama_url:      http://localhost:11434
   # ollama_model:    llama3.2:3b
+  # judge_url:       http://10.1.10.158:8008  # Sif cf-text — LLM-as-judge secondary scorer
+  # judge_url:       http://10.1.10.71:8008   # Heimdall cf-text (alternative)
+  # Or set CF_JUDGE_URL. Populates the Judge URL field in the LLM Eval UI automatically.
+  # hf_token:        hf_xxxxxxxxxxxxxxxxxxxx  # HuggingFace token — required for gated/terms-restricted models
 
 # Imitate tab — pull real samples from sibling CF product APIs and run them
 # through local LLMs to build a corrections dataset.
