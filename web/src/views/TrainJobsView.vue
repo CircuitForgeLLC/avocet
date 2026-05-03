@@ -113,6 +113,7 @@
           </tbody>
         </table>
       </div>
+      <div v-if="cancelError" class="error-notice" role="alert">{{ cancelError }}</div>
     </section>
 
     <!-- Log panel (SSE) -->
@@ -151,6 +152,7 @@ const loadError   = ref<string | null>(null)
 const submitError = ref<string | null>(null)
 const submitting  = ref(false)
 const cancellingId = ref<string | null>(null)
+const cancelError  = ref<string | null>(null)
 
 const form = ref({
   type: 'classifier' as 'classifier' | 'llm-sft',
@@ -225,15 +227,19 @@ async function submitJob() {
 
 async function cancelJob(id: string) {
   cancellingId.value = id
+  cancelError.value = null
   try {
     const res = await fetch(`/api/train/jobs/${encodeURIComponent(id)}/cancel`, { method: 'DELETE' })
     if (res.ok) {
       jobs.value = jobs.value.map(j =>
         j.id === id ? { ...j, status: 'cancelled' as const } : j
       )
+    } else {
+      cancelError.value = `Failed to cancel job (HTTP ${res.status}).`
     }
-  } catch { /* non-fatal */ }
-  finally {
+  } catch {
+    cancelError.value = 'Network error cancelling job.'
+  } finally {
     cancellingId.value = null
   }
 }
@@ -258,6 +264,11 @@ function openLog(id: string) {
       }
       if (data.type === 'error') {
         logLines.value = [...logLines.value, '--- stream ended with error ---']
+        nextTick(() => {
+          if (logPanelEl.value) {
+            logPanelEl.value.scrollTop = logPanelEl.value.scrollHeight
+          }
+        })
       }
     },
     () => {

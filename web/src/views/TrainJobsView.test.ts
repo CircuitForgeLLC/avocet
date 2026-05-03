@@ -124,4 +124,38 @@ describe('TrainJobsView', () => {
     await flushPromises()
     expect(w.find('button.view-log-btn').exists()).toBe(true)
   })
+  it('shows error when config JSON is invalid', async () => {
+    const w = mount(TrainJobsView)
+    await flushPromises()
+    await w.find('input.model-key-input').setValue('my-model')
+    await w.find('textarea.config-textarea').setValue('{ not valid json }')
+    await w.find('button.submit-job-btn').trigger('click')
+    await flushPromises()
+    expect(w.find('.error-notice').exists()).toBe(true)
+    expect(w.find('.error-notice').text()).toContain('not valid')
+  })
+
+  it('shows error notice when jobs load fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+      text: async () => '',
+    }))
+    const w = mount(TrainJobsView)
+    await flushPromises()
+    expect(w.find('.error-notice').exists()).toBe(true)
+    expect(w.find('table.jobs-table').exists()).toBe(false)
+  })
+
+  it('cancel button optimistically updates job status to cancelled', async () => {
+    const w = mount(TrainJobsView)
+    await flushPromises()
+    await w.find('button.cancel-btn').trigger('click')
+    await flushPromises()
+    // After cancel, job should show status-cancelled pill (not status-queued)
+    expect(w.find('.status-cancelled').exists()).toBe(true)
+    expect(w.find('.status-queued').exists()).toBe(false)
+  })
+
 })
