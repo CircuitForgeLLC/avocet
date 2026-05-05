@@ -322,3 +322,43 @@ def test_default_exemplars_strings_are_formatted_correctly():
             assert "\n\n" in text, (
                 f"{label!r} exemplar missing double-newline separator: {text[:50]!r}"
             )
+
+# ---- EmbeddingKNNAdapter constructor tests ----
+
+def test_embedding_knn_is_classifier_adapter():
+    from scripts.classifier_adapters import EmbeddingKNNAdapter, ClassifierAdapter
+    adapter = EmbeddingKNNAdapter(
+        "test-knn", "nomic-embed-text",
+        k=3, orch_url="http://orch:7700", ollama_url="http://ollama:11434",
+    )
+    assert isinstance(adapter, ClassifierAdapter)
+
+
+def test_embedding_knn_name_and_model_id():
+    from scripts.classifier_adapters import EmbeddingKNNAdapter
+    adapter = EmbeddingKNNAdapter(
+        "embed-knn-nomic", "nomic-embed-text",
+        k=3, orch_url="http://orch:7700", ollama_url="http://ollama:11434",
+    )
+    assert adapter.name == "embed-knn-nomic"
+    assert adapter.model_id == "nomic-embed-text"
+
+
+def test_embedding_knn_uses_default_exemplars_when_none_given():
+    from scripts.classifier_adapters import EmbeddingKNNAdapter, DEFAULT_EXEMPLARS
+    adapter = EmbeddingKNNAdapter(
+        "test", "nomic-embed-text",
+        k=3, orch_url="http://orch:7700", ollama_url="http://ollama:11434",
+    )
+    assert adapter._exemplar_texts is DEFAULT_EXEMPLARS
+
+
+def test_embedding_knn_accepts_custom_exemplars():
+    from scripts.classifier_adapters import EmbeddingKNNAdapter
+    custom = {"rejected": ["Sorry, we went with others."]}
+    adapter = EmbeddingKNNAdapter(
+        "test", "nomic-embed-text",
+        k=3, orch_url="http://orch:7700", ollama_url="http://ollama:11434",
+        exemplar_texts=custom,
+    )
+    assert adapter._exemplar_texts is custom
