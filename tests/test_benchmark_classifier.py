@@ -250,5 +250,6 @@ def test_embed_knn_nomic_registry_entry():
     entry = MODEL_REGISTRY["embed-knn-nomic"]
     assert entry["adapter"] is EmbeddingKNNAdapter
     assert entry["model_id"] == "nomic-embed-text"
+    assert entry["params"] == "local-embed"
     assert entry["default"] is False
     assert entry.get("kwargs", {}).get("k") == 3
