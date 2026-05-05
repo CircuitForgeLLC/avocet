@@ -293,3 +293,21 @@ def test_cosine_known_value():
 def test_cosine_zero_vector_returns_zero():
     from scripts.classifier_adapters import _cosine
     assert _cosine([0.0, 0.0], [1.0, 0.0]) == pytest.approx(0.0)
+
+
+# ---- DEFAULT_EXEMPLARS tests ----
+
+def test_default_exemplars_covers_all_labels():
+    from scripts.classifier_adapters import DEFAULT_EXEMPLARS, LABELS
+    for label in LABELS:
+        assert label in DEFAULT_EXEMPLARS, f"DEFAULT_EXEMPLARS missing label: {label}"
+        assert len(DEFAULT_EXEMPLARS[label]) >= 1, f"{label} has no exemplar texts"
+
+
+def test_default_exemplars_sparse_labels_have_at_least_four():
+    from scripts.classifier_adapters import DEFAULT_EXEMPLARS
+    # These labels have very few real examples; need >= 4 so k=3 vote is meaningful
+    for label in ("hired", "survey_received", "event_rescheduled"):
+        assert len(DEFAULT_EXEMPLARS[label]) >= 4, (
+            f"{label} needs >= 4 exemplars for k=3 voting to work reliably"
+        )

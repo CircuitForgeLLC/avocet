@@ -13,12 +13,14 @@ from typing import Any
 __all__ = [
     "LABELS",
     "LABEL_DESCRIPTIONS",
+    "DEFAULT_EXEMPLARS",
     "compute_metrics",
     "ClassifierAdapter",
     "ZeroShotAdapter",
     "GLiClassAdapter",
     "RerankerAdapter",
     "FineTunedAdapter",
+    "EmbeddingKNNAdapter",
 ]
 
 LABELS: list[str] = [
@@ -125,6 +127,72 @@ def _cosine(a: list[float], b: list[float]) -> float:
     norm_b = sum(x * x for x in b) ** 0.5
     return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
 
+
+DEFAULT_EXEMPLARS: dict[str, list[str]] = {
+    "interview_scheduled": [
+        "Subject: Interview Invitation\n\nWe would like to invite you for a phone screen next week.",
+        "Subject: Schedule a call\n\nCould you be available for a video interview on Tuesday?",
+        "Subject: Next Steps\n\nWe'd like to move forward with a technical interview. Please select a time.",
+        "Subject: Interview Details\n\nHere are the dial-in instructions for your interview tomorrow.",
+    ],
+    "offer_received": [
+        "Subject: Offer Letter Enclosed\n\nWe are pleased to extend you an offer of employment.",
+        "Subject: Job Offer\n\nDear candidate, we are excited to offer you the position of Software Engineer.",
+        "Subject: Employment Offer\n\nPlease find attached your formal offer letter and compensation details.",
+        "Subject: Offer of Employment\n\nCongratulations! We would like to offer you a full-time position.",
+    ],
+    "rejected": [
+        "Subject: Your Application\n\nAfter careful consideration, we have decided to move forward with other candidates.",
+        "Subject: Application Status\n\nWe regret to inform you that your application has not been selected.",
+        "Subject: Thank you for applying\n\nWe appreciate your interest but have chosen not to proceed.",
+        "Subject: Update on your candidacy\n\nWe will not be moving forward with your application at this time.",
+    ],
+    "positive_response": [
+        "Subject: Your profile\n\nI came across your LinkedIn and think you would be a great fit for our team.",
+        "Subject: Exciting opportunity\n\nWe were impressed by your background and would love to connect.",
+        "Subject: Following up\n\nThank you for your interest — we'd like to learn more about your experience.",
+        "Subject: Great fit\n\nYour skills align well with what we are looking for. Let's set up a call.",
+    ],
+    "survey_received": [
+        "Subject: Candidate Experience Survey\n\nPlease complete this brief survey about your application experience.",
+        "Subject: Culture Fit Assessment\n\nAs part of our process, we ask all candidates to complete a short assessment.",
+        "Subject: Skills Assessment\n\nWe'd like you to complete our online coding assessment before proceeding.",
+        "Subject: Personality Assessment\n\nPlease complete the following assessment as the next step in our process.",
+        "Subject: Interview Feedback Survey\n\nThank you for interviewing — your feedback helps us improve our process.",
+    ],
+    "neutral": [
+        "Subject: Application Received\n\nWe have received your application and will be in touch.",
+        "Subject: Thank you for applying\n\nYour application is under review. We will contact you if needed.",
+        "Subject: Confirmation\n\nThis email confirms receipt of your application to our company.",
+        "Subject: Application Confirmation\n\nThank you for your interest. We will review your materials and follow up.",
+    ],
+    "event_rescheduled": [
+        "Subject: Interview Rescheduled\n\nDue to a conflict, we need to move your interview to a new time.",
+        "Subject: Change of interview time\n\nWe apologize — your interview has been rescheduled to Thursday.",
+        "Subject: Updated interview details\n\nYour interview has been moved from Monday to Wednesday at 2pm.",
+        "Subject: Reschedule request\n\nWould you be available to reschedule to a different time slot?",
+        "Subject: New interview time\n\nYour phone screen has been moved from tomorrow to next week.",
+    ],
+    "digest": [
+        "Subject: 15 new jobs matching your search\n\nHere are the latest job postings that match your profile.",
+        "Subject: Weekly Job Digest\n\nThis week's top opportunities for Software Engineers in your area.",
+        "Subject: Jobs you might like\n\nBased on your profile, here are some positions we recommend.",
+        "Subject: New jobs for you\n\nSee the latest openings from companies on your watchlist.",
+    ],
+    "new_lead": [
+        "Subject: Exciting opportunity at our company\n\nHi, I noticed your background and think you'd be a great fit.",
+        "Subject: Are you open to new opportunities?\n\nI'm a recruiter reaching out about a role matching your experience.",
+        "Subject: Quick question\n\nWould you be interested in hearing about a senior engineering role?",
+        "Subject: Recruiting outreach\n\nI came across your profile and wanted to share an exciting opening.",
+    ],
+    "hired": [
+        "Subject: Welcome to the team!\n\nWe are thrilled to have you join us. Here are your onboarding details.",
+        "Subject: Onboarding information\n\nCongratulations on accepting our offer. Your start date is confirmed.",
+        "Subject: First day information\n\nWe look forward to your first day. Please arrive at 9am and ask for HR.",
+        "Subject: Background check initiated\n\nAs part of your onboarding, we have initiated a background check.",
+        "Subject: Equipment setup\n\nYour laptop and equipment will be ready for pickup on your first day.",
+    ],
+}
 
 class ClassifierAdapter(abc.ABC):
     """Abstract base for all email classifier adapters."""
