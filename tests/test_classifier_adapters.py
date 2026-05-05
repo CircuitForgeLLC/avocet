@@ -301,7 +301,7 @@ def test_default_exemplars_covers_all_labels():
     from scripts.classifier_adapters import DEFAULT_EXEMPLARS, LABELS
     for label in LABELS:
         assert label in DEFAULT_EXEMPLARS, f"DEFAULT_EXEMPLARS missing label: {label}"
-        assert len(DEFAULT_EXEMPLARS[label]) >= 1, f"{label} has no exemplar texts"
+        assert len(DEFAULT_EXEMPLARS[label]) >= 4, f"{label} needs >= 4 exemplars for k=3 voting"
 
 
 def test_default_exemplars_sparse_labels_have_at_least_four():
@@ -311,3 +311,14 @@ def test_default_exemplars_sparse_labels_have_at_least_four():
         assert len(DEFAULT_EXEMPLARS[label]) >= 4, (
             f"{label} needs >= 4 exemplars for k=3 voting to work reliably"
         )
+
+def test_default_exemplars_strings_are_formatted_correctly():
+    from scripts.classifier_adapters import DEFAULT_EXEMPLARS
+    for label, texts in DEFAULT_EXEMPLARS.items():
+        for text in texts:
+            assert text.startswith("Subject: "), (
+                f"{label!r} exemplar missing 'Subject: ' prefix: {text[:50]!r}"
+            )
+            assert "\n\n" in text, (
+                f"{label!r} exemplar missing double-newline separator: {text[:50]!r}"
+            )

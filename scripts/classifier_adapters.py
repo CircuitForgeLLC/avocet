@@ -20,7 +20,6 @@ __all__ = [
     "GLiClassAdapter",
     "RerankerAdapter",
     "FineTunedAdapter",
-    "EmbeddingKNNAdapter",
 ]
 
 LABELS: list[str] = [
@@ -158,7 +157,7 @@ DEFAULT_EXEMPLARS: dict[str, list[str]] = {
         "Subject: Culture Fit Assessment\n\nAs part of our process, we ask all candidates to complete a short assessment.",
         "Subject: Skills Assessment\n\nWe'd like you to complete our online coding assessment before proceeding.",
         "Subject: Personality Assessment\n\nPlease complete the following assessment as the next step in our process.",
-        "Subject: Interview Feedback Survey\n\nThank you for interviewing — your feedback helps us improve our process.",
+        "Subject: Pre-interview questionnaire\n\nBefore we schedule your interview, please complete this brief skills survey.",
     ],
     "neutral": [
         "Subject: Application Received\n\nWe have received your application and will be in touch.",
@@ -193,6 +192,7 @@ DEFAULT_EXEMPLARS: dict[str, list[str]] = {
         "Subject: Equipment setup\n\nYour laptop and equipment will be ready for pickup on your first day.",
     ],
 }
+
 
 class ClassifierAdapter(abc.ABC):
     """Abstract base for all email classifier adapters."""
