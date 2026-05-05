@@ -2,11 +2,6 @@
 import pytest
 
 
-def test_registry_has_thirteen_models():
-    from scripts.benchmark_classifier import MODEL_REGISTRY
-    assert len(MODEL_REGISTRY) == 13
-
-
 def test_registry_default_count():
     from scripts.benchmark_classifier import MODEL_REGISTRY
     defaults = [k for k, v in MODEL_REGISTRY.items() if v["default"]]
@@ -243,3 +238,17 @@ def test_build_exemplars_skips_rows_with_no_content(tmp_path):
     result = build_exemplars_from_jsonl(str(f))
     assert list(result.keys()) == ["neutral"]
     assert len(result["neutral"]) == 1
+
+def test_registry_has_fourteen_models():
+    from scripts.benchmark_classifier import MODEL_REGISTRY
+    assert len(MODEL_REGISTRY) == 14
+
+
+def test_embed_knn_nomic_registry_entry():
+    from scripts.benchmark_classifier import MODEL_REGISTRY
+    from scripts.classifier_adapters import EmbeddingKNNAdapter
+    entry = MODEL_REGISTRY["embed-knn-nomic"]
+    assert entry["adapter"] is EmbeddingKNNAdapter
+    assert entry["model_id"] == "nomic-embed-text"
+    assert entry["default"] is False
+    assert entry.get("kwargs", {}).get("k") == 3

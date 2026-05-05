@@ -39,6 +39,7 @@ from scripts.classifier_adapters import (
     LABELS,
     LABEL_DESCRIPTIONS,
     ClassifierAdapter,
+    EmbeddingKNNAdapter,
     FineTunedAdapter,
     GLiClassAdapter,
     RerankerAdapter,
@@ -129,6 +130,13 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "model_id": "vicgalle/xlm-roberta-large-xnli-anli",
         "params": "600M",
         "default": False,
+    },
+    "embed-knn-nomic": {
+        "adapter": EmbeddingKNNAdapter,
+        "model_id": "nomic-embed-text",
+        "params": "local-embed",
+        "default": False,   # requires orch or ollama; use --include-slow
+        "kwargs": {"k": 3},
     },
 }
 
