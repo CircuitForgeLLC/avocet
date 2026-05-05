@@ -399,7 +399,7 @@ class EmbeddingKNNAdapter(ClassifierAdapter):
     classify(subject, body):
       Embeds the input email, computes cosine similarity against all stored exemplar
       vectors, and majority-votes the top-k labels (default k=3). Tie-break: label
-      with the highest mean similarity score among tied vote counts wins.
+      with the highest total similarity score among tied vote counts wins.
 
     unload():
       Releases the cf-orch allocation (DELETE .../allocations/{id}) and clears state.
@@ -489,10 +489,14 @@ class EmbeddingKNNAdapter(ClassifierAdapter):
             orch_url_used = ""
         self._node_url = node_url
         self._orch_url_used = orch_url_used
-        embeddings: dict[str, list[list[float]]] = {}
-        for label, texts in self._exemplar_texts.items():
-            embeddings[label] = self._embed(node_url, texts)
-        self._exemplar_embeddings = embeddings
+        try:
+            embeddings: dict[str, list[list[float]]] = {}
+            for label, texts in self._exemplar_texts.items():
+                embeddings[label] = self._embed(node_url, texts)
+            self._exemplar_embeddings = embeddings
+        except Exception:
+            self.unload()
+            raise
 
     def unload(self) -> None:
         if self._allocation_id and self._orch_url_used:
@@ -523,4 +527,7 @@ class EmbeddingKNNAdapter(ClassifierAdapter):
         votes: dict[str, list[float]] = {}
         for score, label in top_k:
             votes.setdefault(label, []).append(score)
-        return max(votes, key=lambda lbl: sum(votes[lbl]))
+        return max(
+            votes,
+            key=lambda lbl: (len(votes[lbl]), sum(votes[lbl])),
+        )

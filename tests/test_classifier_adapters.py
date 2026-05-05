@@ -592,13 +592,13 @@ def test_classify_tiebreak_by_mean_score():
 
 def test_classify_sparse_label_can_win():
     from unittest.mock import patch
-    # "hired" has only 1 exemplar; query vector is closest to it
+    # "hired" has only 1 exemplar; with k=1, the single closest match wins
     adapter = _adapter_with_embeddings({
         "rejected": [[0.0, 0.0, 1.0], [0.0, 0.1, 0.9]],
         "hired":    [[1.0, 0.0, 0.0]],
-    }, k=3)
+    }, k=1)
 
-    # Query [1,0,0] → hired exemplar scores 1.0; rejected exemplars score ~0
+    # Query [1,0,0] → hired exemplar scores 1.0; closest single match wins
     with patch("httpx.post", return_value=_embed_resp([1.0, 0.0, 0.0])):
         result = adapter.classify("Welcome aboard", "Your first day details")
 
@@ -637,3 +637,4 @@ def test_classify_lazy_loads_when_not_loaded():
     assert result == "rejected"
     assert any("/allocate" in u for u in post_urls), "lazy load must call allocate"
     assert adapter._exemplar_embeddings != {}
+    assert adapter._node_url == "http://navi:11434"
