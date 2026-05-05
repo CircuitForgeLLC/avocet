@@ -418,6 +418,8 @@ def test_load_calls_allocate_then_embeds_each_label():
     assert "hired" in adapter._exemplar_embeddings
     assert len(adapter._exemplar_embeddings["rejected"]) == 1
     assert len(adapter._exemplar_embeddings["hired"]) == 2
+    assert adapter._exemplar_embeddings["rejected"][0] == [0.1, 0.2, 0.3]
+    assert adapter._exemplar_embeddings["hired"][0] == [0.1, 0.2, 0.3]
 
 
 def test_load_falls_back_to_ollama_when_allocate_fails():
@@ -442,6 +444,35 @@ def test_load_falls_back_to_ollama_when_allocate_fails():
         return resp
 
     with patch("httpx.post", side_effect=failing_allocate_mock):
+        adapter.load()
+
+    assert adapter._allocation_id == ""
+    assert adapter._orch_url_used == ""
+    assert adapter._node_url == "http://ollama:11434"
+    assert "rejected" in adapter._exemplar_embeddings
+
+
+def test_load_falls_back_to_ollama_when_allocate_raises():
+    from unittest.mock import patch, MagicMock
+    import httpx as _httpx
+    from scripts.classifier_adapters import EmbeddingKNNAdapter
+
+    exemplars = {"rejected": ["We went with others"]}
+    adapter = EmbeddingKNNAdapter(
+        "test", "nomic-embed-text", k=3,
+        orch_url="http://orch:7700", ollama_url="http://ollama:11434",
+        exemplar_texts=exemplars,
+    )
+
+    def raising_mock(url, *, json=None, timeout=None, **kwargs):
+        if "/allocate" in url:
+            raise _httpx.ConnectError("connection refused")
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
+        return resp
+
+    with patch("httpx.post", side_effect=raising_mock):
         adapter.load()
 
     assert adapter._allocation_id == ""

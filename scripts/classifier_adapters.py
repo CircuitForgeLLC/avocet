@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import abc
 from collections import defaultdict
+import httpx
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,8 @@ __all__ = [
     "FineTunedAdapter",
     "EmbeddingKNNAdapter",
 ]
+
+_logger = logging.getLogger(__name__)
 
 LABELS: list[str] = [
     "interview_scheduled",
@@ -447,7 +451,6 @@ class EmbeddingKNNAdapter(ClassifierAdapter):
         return cforch.get("coordinator_url", ""), cforch.get("ollama_url", "")
 
     def _embed(self, node_url: str, texts: list[str]) -> list[list[float]]:
-        import httpx  # noqa: PLC0415
         resp = httpx.post(
             f"{node_url}/v1/embeddings",
             json={"model": self._model_id, "input": texts},
@@ -457,7 +460,10 @@ class EmbeddingKNNAdapter(ClassifierAdapter):
         return [item["embedding"] for item in resp.json()["data"]]
 
     def load(self) -> None:
-        import httpx  # noqa: PLC0415
+        if self._allocation_id or self._exemplar_embeddings:
+            raise RuntimeError(
+                "EmbeddingKNNAdapter.load() called while already loaded — call unload() first"
+            )
         orch_url, ollama_url = self._resolve_urls()
         node_url = ""
         orch_url_used = ""
@@ -473,21 +479,24 @@ class EmbeddingKNNAdapter(ClassifierAdapter):
                     node_url = data["url"]
                     self._allocation_id = data["allocation_id"]
                     orch_url_used = orch_url
-            except Exception:
-                pass
+            except Exception as exc:
+                _logger.warning(
+                    "cf-orch allocation failed, falling back to direct ollama_url: %s", exc
+                )
         if not node_url:
             node_url = ollama_url
             self._allocation_id = ""
             orch_url_used = ""
         self._node_url = node_url
         self._orch_url_used = orch_url_used
+        embeddings: dict[str, list[list[float]]] = {}
         for label, texts in self._exemplar_texts.items():
-            self._exemplar_embeddings[label] = self._embed(node_url, texts)
+            embeddings[label] = self._embed(node_url, texts)
+        self._exemplar_embeddings = embeddings
 
     def unload(self) -> None:
         if self._allocation_id and self._orch_url_used:
             try:
-                import httpx  # noqa: PLC0415
                 httpx.request(
                     "DELETE",
                     f"{self._orch_url_used}/api/services/ollama/allocations/{self._allocation_id}",
