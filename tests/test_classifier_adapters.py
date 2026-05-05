@@ -268,3 +268,28 @@ def test_finetuned_adapter_unload_clears_pipeline():
         assert adapter._pipeline is not None
         adapter.unload()
         assert adapter._pipeline is None
+
+# ---- _cosine() tests ----
+
+def test_cosine_identical_unit_vectors():
+    import math
+    from scripts.classifier_adapters import _cosine
+    assert _cosine([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
+
+
+def test_cosine_orthogonal_vectors():
+    from scripts.classifier_adapters import _cosine
+    assert _cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
+
+
+def test_cosine_known_value():
+    import math
+    from scripts.classifier_adapters import _cosine
+    # [1,0] vs [1/sqrt(2), 1/sqrt(2)] → dot = 1/sqrt(2), both norms = 1 → 1/sqrt(2)
+    v = [1.0 / math.sqrt(2), 1.0 / math.sqrt(2)]
+    assert _cosine([1.0, 0.0], v) == pytest.approx(1.0 / math.sqrt(2))
+
+
+def test_cosine_zero_vector_returns_zero():
+    from scripts.classifier_adapters import _cosine
+    assert _cosine([0.0, 0.0], [1.0, 0.0]) == pytest.approx(0.0)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import abc
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -115,6 +116,14 @@ def compute_metrics(
         result["__macro_f1__"] = 0.0
     result["__accuracy__"] = sum(tp.values()) / len(predictions) if predictions else 0.0
     return result
+
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
 
 
 class ClassifierAdapter(abc.ABC):
