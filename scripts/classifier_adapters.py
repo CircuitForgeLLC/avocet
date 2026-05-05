@@ -446,11 +446,59 @@ class EmbeddingKNNAdapter(ClassifierAdapter):
         cforch = cfg.get("cforch", {}) or {}
         return cforch.get("coordinator_url", ""), cforch.get("ollama_url", "")
 
+    def _embed(self, node_url: str, texts: list[str]) -> list[list[float]]:
+        import httpx  # noqa: PLC0415
+        resp = httpx.post(
+            f"{node_url}/v1/embeddings",
+            json={"model": self._model_id, "input": texts},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        return [item["embedding"] for item in resp.json()["data"]]
+
     def load(self) -> None:
-        raise NotImplementedError
+        import httpx  # noqa: PLC0415
+        orch_url, ollama_url = self._resolve_urls()
+        node_url = ""
+        orch_url_used = ""
+        if orch_url:
+            try:
+                resp = httpx.post(
+                    f"{orch_url}/api/services/ollama/allocate",
+                    json={"model": self._model_id},
+                    timeout=15.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    node_url = data["url"]
+                    self._allocation_id = data["allocation_id"]
+                    orch_url_used = orch_url
+            except Exception:
+                pass
+        if not node_url:
+            node_url = ollama_url
+            self._allocation_id = ""
+            orch_url_used = ""
+        self._node_url = node_url
+        self._orch_url_used = orch_url_used
+        for label, texts in self._exemplar_texts.items():
+            self._exemplar_embeddings[label] = self._embed(node_url, texts)
 
     def unload(self) -> None:
-        raise NotImplementedError
+        if self._allocation_id and self._orch_url_used:
+            try:
+                import httpx  # noqa: PLC0415
+                httpx.request(
+                    "DELETE",
+                    f"{self._orch_url_used}/api/services/ollama/allocations/{self._allocation_id}",
+                    timeout=10.0,
+                )
+            except Exception:
+                pass
+        self._exemplar_embeddings = {}
+        self._node_url = ""
+        self._allocation_id = ""
+        self._orch_url_used = ""
 
     def classify(self, subject: str, body: str) -> str:
         raise NotImplementedError
