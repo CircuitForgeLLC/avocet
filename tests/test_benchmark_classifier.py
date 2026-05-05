@@ -225,3 +225,21 @@ def test_build_exemplars_truncates_body_at_600(tmp_path):
     result = build_exemplars_from_jsonl(str(f))
     body_part = result["neutral"][0].split("\n\n", 1)[1]
     assert len(body_part) == 600
+
+
+def test_build_exemplars_skips_rows_with_no_content(tmp_path):
+    from scripts.benchmark_classifier import build_exemplars_from_jsonl
+    import json
+
+    rows = [
+        {"label": "neutral"},                                  # no subject, no body -> skip
+        {"subject": "S", "body": "B", "label": "neutral"},    # valid -> keep
+        {"label": "rejected", "subject": "", "body": ""},      # empty strings -> skip
+    ]
+    f = tmp_path / "score.jsonl"
+    lines = [json.dumps(r) for r in rows]
+    f.write_text("\n".join(lines))
+
+    result = build_exemplars_from_jsonl(str(f))
+    assert list(result.keys()) == ["neutral"]
+    assert len(result["neutral"]) == 1

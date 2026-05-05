@@ -202,15 +202,20 @@ def build_exemplars_from_jsonl(path: str, k_per_label: int = 10) -> dict[str, li
                 continue
             try:
                 row = json.loads(line)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                print(f"[build_exemplars] WARN: skipping malformed line: {exc}", flush=True)
                 continue
             label = row.get("label")
             if not label:
                 continue
+            subject = row.get("subject", "")
+            body = row.get("body", "")
+            if not subject and not body:
+                continue
             texts = result.setdefault(label, [])
             if len(texts) < k_per_label:
                 texts.append(
-                    f"Subject: {row.get('subject', '')}\n\n{row.get('body', '')[:600]}"
+                    f"Subject: {subject}\n\n{body[:600]}"
                 )
     return result
 
