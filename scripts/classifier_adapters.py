@@ -510,4 +510,17 @@ class EmbeddingKNNAdapter(ClassifierAdapter):
         self._orch_url_used = ""
 
     def classify(self, subject: str, body: str) -> str:
-        raise NotImplementedError
+        if not self._exemplar_embeddings:
+            self.load()
+        text = f"Subject: {subject}\n\n{body[:600]}"
+        [query_vec] = self._embed(self._node_url, [text])
+        scored: list[tuple[float, str]] = [
+            (_cosine(query_vec, vec), label)
+            for label, vecs in self._exemplar_embeddings.items()
+            for vec in vecs
+        ]
+        top_k = sorted(scored, reverse=True)[: self._k]
+        votes: dict[str, list[float]] = {}
+        for score, label in top_k:
+            votes.setdefault(label, []).append(score)
+        return max(votes, key=lambda lbl: sum(votes[lbl]))
