@@ -184,6 +184,37 @@ def discover_finetuned_models(models_dir: Path | None = None) -> list[dict]:
     return found
 
 
+def build_exemplars_from_jsonl(path: str, k_per_label: int = 10) -> dict[str, list[str]]:
+    """Sample up to k_per_label formatted email texts per label from a scored JSONL.
+
+    Formats each row as 'Subject: {subject}\n\n{body[:600]}' — the same format
+    EmbeddingKNNAdapter uses at classify() time.  Rows missing the 'label' key
+    are skipped silently.
+
+    Returns dict[label, list[str]] ready for EmbeddingKNNAdapter(exemplar_texts=...).
+    """
+    result: dict[str, list[str]] = {}
+    p = Path(path)
+    with p.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            label = row.get("label")
+            if not label:
+                continue
+            texts = result.setdefault(label, [])
+            if len(texts) < k_per_label:
+                texts.append(
+                    f"Subject: {row.get('subject', '')}\n\n{row.get('body', '')[:600]}"
+                )
+    return result
+
+
 def _active_models(include_slow: bool = False) -> dict[str, dict[str, Any]]:
     """Return the active model registry, merged with any discovered fine-tuned models."""
     active: dict[str, dict[str, Any]] = {

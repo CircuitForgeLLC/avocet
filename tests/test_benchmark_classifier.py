@@ -166,3 +166,62 @@ def test_active_models_includes_discovered_finetuned(tmp_path):
 
     assert "avocet-deberta-small" in models
     assert isinstance(models["avocet-deberta-small"]["adapter_instance"], FineTunedAdapter)
+
+
+# ---- build_exemplars_from_jsonl() tests ----
+
+def test_build_exemplars_samples_up_to_k_per_label(tmp_path):
+    from scripts.benchmark_classifier import build_exemplars_from_jsonl
+    import json
+
+    rows = [{"subject": f"S{i}", "body": f"B{i}", "label": "rejected"} for i in range(15)]
+    rows.append({"subject": "Hire", "body": "Welcome", "label": "hired"})
+    f = tmp_path / "score.jsonl"
+    f.write_text("\n".join(json.dumps(r) for r in rows))
+
+    result = build_exemplars_from_jsonl(str(f), k_per_label=10)
+
+    assert len(result["rejected"]) == 10
+    assert len(result["hired"]) == 1
+    assert result["rejected"][0].startswith("Subject: S")
+
+
+def test_build_exemplars_formats_text_correctly(tmp_path):
+    from scripts.benchmark_classifier import build_exemplars_from_jsonl
+    import json
+
+    row = {"subject": "My Subject", "body": "My Body", "label": "neutral"}
+    f = tmp_path / "score.jsonl"
+    f.write_text(json.dumps(row))
+
+    result = build_exemplars_from_jsonl(str(f))
+
+    assert result["neutral"][0] == "Subject: My Subject\n\nMy Body"
+
+
+def test_build_exemplars_skips_rows_missing_label(tmp_path):
+    from scripts.benchmark_classifier import build_exemplars_from_jsonl
+    import json
+
+    rows = [
+        {"subject": "A", "body": "B", "label": "neutral"},
+        {"subject": "No label here", "body": "Body"},
+    ]
+    f = tmp_path / "score.jsonl"
+    f.write_text("\n".join(json.dumps(r) for r in rows))
+
+    result = build_exemplars_from_jsonl(str(f))
+    assert list(result.keys()) == ["neutral"]
+
+
+def test_build_exemplars_truncates_body_at_600(tmp_path):
+    from scripts.benchmark_classifier import build_exemplars_from_jsonl
+    import json
+
+    row = {"subject": "S", "body": "x" * 800, "label": "neutral"}
+    f = tmp_path / "score.jsonl"
+    f.write_text(json.dumps(row))
+
+    result = build_exemplars_from_jsonl(str(f))
+    body_part = result["neutral"][0].split("\n\n", 1)[1]
+    assert len(body_part) == 600
