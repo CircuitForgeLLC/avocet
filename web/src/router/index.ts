@@ -18,8 +18,8 @@ export const routes = [
   // ── Top-level ────────────────────────────────────────────
   { path: '/',         component: DashboardView, meta: { title: 'Dashboard' } },
   { path: '/fleet',    component: ModelsView,    meta: { title: 'Fleet'     } },
-  { path: '/settings', component: SettingsView,  meta: { title: 'Settings'  } },
   { path: '/nodes',    component: NodeManagementView, meta: { title: 'Nodes' } },
+  { path: '/settings', component: SettingsView,  meta: { title: 'Settings'  } },
 
   // ── Data domain ──────────────────────────────────────────
   { path: '/data/label',       component: LabelView,       meta: { title: 'Label'       } },
