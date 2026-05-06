@@ -117,7 +117,7 @@ def list_nodes() -> list:
         r = httpx.get(f"{coordinator_url}/api/nodes", timeout=5.0)
         r.raise_for_status()
         coord_nodes: list[dict] = r.json()
-    except (httpx.HTTPError, httpx.ConnectError) as exc:
+    except httpx.HTTPError as exc:
         logger.warning("Coordinator unreachable: %s", exc)
         return []
 
@@ -125,7 +125,8 @@ def list_nodes() -> list:
         sr = httpx.get(f"{coordinator_url}/api/services", timeout=5.0)
         sr.raise_for_status()
         services_data: list[dict] = sr.json()
-    except Exception:
+    except httpx.HTTPError:
+        logger.warning("Services API unreachable for %s, skipping", coordinator_url)
         services_data = []
 
     # Build per-node, per-GPU running services map

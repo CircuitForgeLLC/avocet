@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture(autouse=True)
@@ -47,7 +48,6 @@ def test_list_nodes_returns_empty_when_no_coordinator(client):
     assert r.json() == []
 
 
-from unittest.mock import MagicMock, patch
 
 
 def _fake_nodes_response(nodes_json: list, services_json: list | None = None):
