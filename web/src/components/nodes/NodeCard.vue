@@ -3,34 +3,7 @@ import { ref } from 'vue'
 import GpuRow from './GpuRow.vue'
 import OllamaModelPanel from './OllamaModelPanel.vue'
 import HfNodeModelPanel from './HfNodeModelPanel.vue'
-
-interface GpuEntry {
-  gpu_id: number
-  card: string
-  vram_total_mb: number
-  vram_used_mb: number
-  vram_free_mb: number
-  temp_c: number | null
-  utilization_pct: number | null
-  compute_cap: number | null
-  services_assigned: string[]
-  services_running: string[]
-}
-
-interface ServiceInfo {
-  min_compute_cap: number
-  max_mb: number
-  catalog_size: number
-}
-
-interface NodeSummary {
-  node_id: string
-  online: boolean
-  agent_url: string
-  gpus: GpuEntry[]
-  profile_loaded: boolean
-  services_catalog: Record<string, ServiceInfo>
-}
+import type { NodeSummary } from '../../types/nodes'
 
 const props = defineProps<{ node: NodeSummary }>()
 const emit = defineEmits<{ updated: [] }>()

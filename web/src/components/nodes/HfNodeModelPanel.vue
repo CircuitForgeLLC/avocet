@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 interface CatalogEntry {
   path: string
@@ -27,15 +27,22 @@ const profile = ref<NodeProfile | null>(null)
 const loading = ref(true)
 const error = ref('')
 
+let fetchAbort: AbortController | null = null
+
 async function fetchProfile() {
+  fetchAbort?.abort()
+  fetchAbort = new AbortController()
   loading.value = true
   error.value = ''
   try {
-    const r = await fetch(`/api/nodes-mgmt/nodes/${props.nodeId}/profile`)
+    const r = await fetch(`/api/nodes-mgmt/nodes/${props.nodeId}/profile`, {
+      signal: fetchAbort.signal,
+    })
     if (r.status === 404) { profile.value = null; return }
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     profile.value = await r.json() as NodeProfile
   } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') return
     error.value = e instanceof Error ? e.message : 'Failed to load profile'
   } finally {
     loading.value = false
@@ -43,6 +50,7 @@ async function fetchProfile() {
 }
 
 onMounted(fetchProfile)
+onUnmounted(() => { fetchAbort?.abort() })
 </script>
 
 <template>
@@ -54,10 +62,12 @@ onMounted(fetchProfile)
       Models downloaded there are automatically registered in node catalogs.
     </p>
 
-    <div v-if="loading" class="panel-loading" aria-live="polite">Loading catalog...</div>
-    <div v-else-if="error" class="panel-error" role="alert">{{ error }}</div>
-    <div v-else-if="!profile" class="panel-empty">No profile loaded for this node.</div>
-    <div v-else class="catalog-body">
+    <div aria-live="polite" aria-atomic="true" class="sr-announce">
+      <span v-if="loading">Loading catalog...</span>
+    </div>
+    <div v-if="error" class="panel-error" role="alert">{{ error }}</div>
+    <div v-else-if="!loading && !profile" class="panel-empty">No profile loaded for this node.</div>
+    <div v-else-if="!loading && profile" class="catalog-body">
       <div
         v-for="(svcInfo, svcName) in profile.services"
         :key="String(svcName)"
@@ -117,6 +127,7 @@ onMounted(fetchProfile)
 .catalog-model { font-family: monospace; flex: 1; }
 .catalog-vram { color: var(--text-secondary, #888); white-space: nowrap; }
 .catalog-desc { color: var(--text-secondary, #888); font-size: 0.75rem; flex: 2; }
-.catalog-empty, .panel-empty, .panel-loading { color: var(--text-secondary, #888); font-size: 0.875rem; }
+.catalog-empty, .panel-empty { color: var(--text-secondary, #888); font-size: 0.875rem; }
+.sr-announce { min-height: 1.2em; }
 .panel-error { color: var(--color-error, #fc8181); font-size: 0.8rem; }
 </style>

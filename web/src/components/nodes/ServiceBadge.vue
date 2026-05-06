@@ -17,7 +17,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ toggle: [] }>()
 
-const STATE_LABELS: Record<string, string> = {
+const STATE_LABELS: Record<ServiceState, string> = {
   running: 'Running',
   stopped: 'Stopped',
   'assigned-only': 'Assigned',
@@ -27,7 +27,7 @@ const STATE_LABELS: Record<string, string> = {
   unknown: 'Unknown',
 }
 
-const STATE_ICONS: Record<string, string> = {
+const STATE_ICONS: Record<ServiceState, string> = {
   running: '▶',
   stopped: '⏹',
   'assigned-only': '📌',

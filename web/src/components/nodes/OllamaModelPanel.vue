@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps<{ nodeId: string }>()
 
@@ -18,15 +18,26 @@ const pullStatus = ref('')
 const pullPct = ref(0)
 const pullError = ref('')
 
+// AbortController for the SSE pull stream
+const abortCtrl = ref<AbortController | null>(null)
+
+// AbortController for the one-shot fetchModels request
+let fetchAbort: AbortController | null = null
+
 async function fetchModels() {
+  fetchAbort?.abort()
+  fetchAbort = new AbortController()
   loading.value = true
   loadError.value = ''
   try {
-    const r = await fetch(`/api/nodes-mgmt/nodes/${props.nodeId}/models/ollama`)
+    const r = await fetch(`/api/nodes-mgmt/nodes/${props.nodeId}/models/ollama`, {
+      signal: fetchAbort.signal,
+    })
     const data = await r.json() as { models?: OllamaModel[]; error?: string }
     if (data.error) { loadError.value = data.error; return }
     models.value = data.models ?? []
   } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') return
     loadError.value = e instanceof Error ? e.message : 'Failed to load models'
   } finally {
     loading.value = false
@@ -41,11 +52,15 @@ async function doPull() {
   pullError.value = ''
   pullPct.value = 0
 
+  const ctrl = new AbortController()
+  abortCtrl.value = ctrl
+
   try {
     const resp = await fetch(`/api/nodes-mgmt/nodes/${props.nodeId}/models/ollama/pull`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
+      signal: ctrl.signal,
     })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     if (!resp.body) throw new Error('No response body')
@@ -68,8 +83,7 @@ async function doPull() {
           }
           if (evt.error) {
             pullError.value = evt.error
-            pulling.value = false
-            return
+            break
           }
           if (evt.status) pullStatus.value = evt.status
           if (evt.total && evt.completed) {
@@ -78,15 +92,20 @@ async function doPull() {
           if (evt.status === 'success') {
             pullStatus.value = 'Done!'
             pullName.value = ''
-            await fetchModels()
+            break
           }
         } catch { /* skip malformed line */ }
       }
     }
+
+    // Refresh model list after the stream closes (success or benign end)
+    await fetchModels()
   } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') return
     pullError.value = e instanceof Error ? e.message : 'Pull failed'
   } finally {
     pulling.value = false
+    abortCtrl.value = null
   }
 }
 
@@ -109,6 +128,10 @@ function formatSize(bytes: number): string {
 }
 
 onMounted(fetchModels)
+onUnmounted(() => {
+  abortCtrl.value?.abort()
+  fetchAbort?.abort()
+})
 </script>
 
 <template>
@@ -150,9 +173,11 @@ onMounted(fetchModels)
       </span>
     </div>
 
-    <div v-if="loading" class="panel-loading" aria-live="polite">Loading...</div>
-    <div v-else-if="loadError" class="panel-error" role="alert">{{ loadError }}</div>
-    <ul v-else class="model-list" role="list">
+    <div aria-live="polite" aria-atomic="true" class="sr-announce">
+      <span v-if="loading">Loading...</span>
+    </div>
+    <div v-if="loadError" class="panel-error" role="alert">{{ loadError }}</div>
+    <ul v-if="!loading && !loadError" class="model-list" role="list">
       <li v-if="!models.length" class="model-empty">No Ollama models installed on this node.</li>
       <li v-for="m in models" :key="m.name" class="model-item">
         <span class="model-name">{{ m.name }}</span>
@@ -198,6 +223,7 @@ onMounted(fetchModels)
 .progress-fill { height: 100%; background: var(--color-primary, #4080ff); transition: width 0.2s; }
 .progress-label { font-size: 0.75rem; color: var(--text-secondary, #888); }
 .pull-error, .panel-error { color: var(--color-error, #fc8181); font-size: 0.8rem; margin-bottom: 0.5rem; }
+.sr-announce { min-height: 1.2em; }
 .panel-loading { color: var(--text-secondary, #888); font-size: 0.875rem; }
 .model-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
 .model-item {

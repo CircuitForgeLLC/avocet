@@ -1,25 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import ServiceBadge from './ServiceBadge.vue'
-
-interface GpuEntry {
-  gpu_id: number
-  card: string
-  vram_total_mb: number
-  vram_used_mb: number
-  vram_free_mb: number
-  temp_c: number | null
-  utilization_pct: number | null
-  compute_cap: number | null
-  services_assigned: string[]
-  services_running: string[]
-}
-
-interface ServiceInfo {
-  min_compute_cap: number
-  max_mb: number
-  catalog_size: number
-}
+import type { GpuEntry, ServiceInfo } from '../../types/nodes'
 
 const props = defineProps<{
   gpu: GpuEntry
