@@ -287,7 +287,7 @@ def update_gpu_services(node_id: str, gpu_id: int, body: UpdateServicesRequest) 
                 f"{coordinator_url}/api/nodes/{node_id}/reload-profile", timeout=5.0
             )
             reloaded = rr.status_code < 300
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Coordinator reload failed for node %s: %s", node_id, exc)
 
     return {"ok": True, "reloaded": reloaded, "warnings": []}

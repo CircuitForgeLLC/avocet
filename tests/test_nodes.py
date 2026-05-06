@@ -7,6 +7,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
+import os as _os
 
 
 @pytest.fixture(autouse=True)
@@ -202,7 +203,6 @@ def test_get_profile_500_on_malformed_yaml(client, tmp_path):
 
 # ── POST /api/nodes-mgmt/nodes/{node_id}/gpu/{gpu_id}/services ─────────────────
 
-import os as _os
 
 _BASE_PROFILE = {
     "services": {
