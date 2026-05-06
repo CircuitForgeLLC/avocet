@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 import yaml
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -291,3 +292,68 @@ def update_gpu_services(node_id: str, gpu_id: int, body: UpdateServicesRequest) 
             logger.warning("Coordinator reload failed for node %s: %s", node_id, exc)
 
     return {"ok": True, "reloaded": reloaded, "warnings": []}
+
+# ── Ollama model management ────────────────────────────────────────────────────
+
+class PullRequest(BaseModel):
+    name: str
+
+
+@router.get("/nodes/{node_id}/models/ollama")
+def list_ollama_models(node_id: str) -> dict:
+    """Proxy GET {ollama_url}/api/tags for a specific node."""
+    import httpx
+
+    ollama_url = _get_ollama_url(node_id)
+    try:
+        r = httpx.get(f"{ollama_url}/api/tags", timeout=10.0)
+        r.raise_for_status()
+        return r.json()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@router.post("/nodes/{node_id}/models/ollama/pull")
+def pull_ollama_model(node_id: str, body: PullRequest) -> StreamingResponse:
+    """Stream Ollama pull progress as SSE events."""
+    import httpx
+
+    if not body.name:
+        raise HTTPException(400, "name is required")
+
+    ollama_url = _get_ollama_url(node_id)
+
+    def stream():
+        try:
+            with httpx.stream(
+                "POST",
+                f"{ollama_url}/api/pull",
+                json={"name": body.name, "stream": True},
+                timeout=300.0,
+            ) as resp:
+                for line in resp.iter_lines():
+                    if line:
+                        yield f"data: {line}\n\n"
+        except Exception as exc:
+            import json
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.delete("/nodes/{node_id}/models/ollama/{name:path}")
+def delete_ollama_model(node_id: str, name: str) -> dict:
+    """Proxy DELETE to Ollama for a specific node."""
+    import httpx
+
+    ollama_url = _get_ollama_url(node_id)
+    try:
+        r = httpx.request("DELETE", f"{ollama_url}/api/delete", json={"name": name}, timeout=10.0)
+        if r.status_code == 404:
+            raise HTTPException(404, f"Model '{name}' not found on node {node_id}")
+        r.raise_for_status()
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Ollama unreachable: {exc}")

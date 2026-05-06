@@ -345,3 +345,127 @@ def test_update_services_reload_failure_returns_reloaded_false(client, tmp_path)
     data = r.json()
     assert data["ok"] is True
     assert data["reloaded"] is False
+
+# ── Ollama endpoints ───────────────────────────────────────────────────────────
+
+_OLLAMA_PROFILE = {
+    "services": {},
+    "nodes": {
+        "heimdall": {
+            "gpus": [],
+            "agent_url": "http://10.1.10.71:7701",
+        }
+    }
+}
+
+
+def test_list_ollama_models_proxies_tags(client, tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {"profiles_dir": str(profiles_dir)})
+    _write_profile(profiles_dir, "heimdall", _OLLAMA_PROFILE)
+
+    mock_tags = MagicMock()
+    mock_tags.raise_for_status = MagicMock()
+    mock_tags.json.return_value = {
+        "models": [{"name": "nomic-embed-text", "size": 274000000, "modified_at": "2025-01-01"}]
+    }
+
+    with patch("httpx.get", return_value=mock_tags):
+        r = client.get("/api/nodes-mgmt/nodes/heimdall/models/ollama")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["models"]) == 1
+    assert data["models"][0]["name"] == "nomic-embed-text"
+
+
+def test_list_ollama_models_unreachable_returns_error(client, tmp_path):
+    import httpx as _httpx
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {"profiles_dir": str(profiles_dir)})
+    _write_profile(profiles_dir, "heimdall", _OLLAMA_PROFILE)
+
+    with patch("httpx.get", side_effect=_httpx.ConnectError("refused")):
+        r = client.get("/api/nodes-mgmt/nodes/heimdall/models/ollama")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert "error" in data
+
+
+def test_pull_ollama_model_streams_sse(client, tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {"profiles_dir": str(profiles_dir)})
+    _write_profile(profiles_dir, "heimdall", _OLLAMA_PROFILE)
+
+    mock_resp = MagicMock()
+    mock_resp.iter_lines.return_value = iter([
+        '{"status": "pulling manifest"}',
+        '{"status": "pulling", "digest": "sha256-abc", "total": 1000, "completed": 500}',
+        '{"status": "success"}',
+    ])
+
+    with patch("httpx.stream") as mock_stream_fn:
+        mock_stream_fn.return_value.__enter__ = MagicMock(return_value=mock_resp)
+        mock_stream_fn.return_value.__exit__ = MagicMock(return_value=False)
+        r = client.post(
+            "/api/nodes-mgmt/nodes/heimdall/models/ollama/pull",
+            json={"name": "nomic-embed-text"},
+        )
+
+    assert r.status_code == 200
+    body = r.text
+    assert 'data: {"status": "pulling manifest"}' in body
+    assert 'data: {"status": "success"}' in body
+
+
+def test_pull_ollama_model_error_event_in_stream(client, tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {"profiles_dir": str(profiles_dir)})
+    _write_profile(profiles_dir, "heimdall", _OLLAMA_PROFILE)
+
+    mock_resp = MagicMock()
+    mock_resp.iter_lines.return_value = iter([
+        '{"error": "permission denied: /var/lib/ollama/sha256-abc-partial-0"}',
+    ])
+
+    with patch("httpx.stream") as mock_stream_fn:
+        mock_stream_fn.return_value.__enter__ = MagicMock(return_value=mock_resp)
+        mock_stream_fn.return_value.__exit__ = MagicMock(return_value=False)
+        r = client.post(
+            "/api/nodes-mgmt/nodes/heimdall/models/ollama/pull",
+            json={"name": "nomic-embed-text"},
+        )
+
+    assert r.status_code == 200
+    assert "permission denied" in r.text
+
+
+def test_delete_ollama_model_proxies_delete(client, tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {"profiles_dir": str(profiles_dir)})
+    _write_profile(profiles_dir, "heimdall", _OLLAMA_PROFILE)
+
+    mock_del = MagicMock()
+    mock_del.status_code = 200
+    mock_del.raise_for_status = MagicMock()
+
+    with patch("httpx.request", return_value=mock_del):
+        r = client.delete("/api/nodes-mgmt/nodes/heimdall/models/ollama/nomic-embed-text")
+
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+
+
+def test_delete_ollama_model_404_when_not_found(client, tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {"profiles_dir": str(profiles_dir)})
+    _write_profile(profiles_dir, "heimdall", _OLLAMA_PROFILE)
+
+    mock_del = MagicMock()
+    mock_del.status_code = 404
+
+    with patch("httpx.request", return_value=mock_del):
+        r = client.delete("/api/nodes-mgmt/nodes/heimdall/models/ollama/missing-model")
+
+    assert r.status_code == 404
