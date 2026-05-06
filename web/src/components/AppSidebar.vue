@@ -53,6 +53,17 @@
           <span v-if="!stowed" class="nav-label">Fleet</span>
         </RouterLink>
       </li>
+      <li>
+        <RouterLink
+          to="/nodes"
+          class="nav-item"
+          :title="stowed ? 'Nodes' : ''"
+          @click="isMobile && stow()"
+        >
+          <span class="nav-icon" aria-hidden="true">🖥️</span>
+          <span v-if="!stowed" class="nav-label">Nodes</span>
+        </RouterLink>
+      </li>
 
       <!-- ① Data section -->
       <li>

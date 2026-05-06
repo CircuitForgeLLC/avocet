@@ -12,12 +12,14 @@ const TrainJobsView    = () => import('../views/TrainJobsView.vue')
 const TrainResultsView = () => import('../views/TrainResultsView.vue')
 const ModelsView       = () => import('../views/ModelsView.vue')
 const SettingsView     = () => import('../views/SettingsView.vue')
+const NodeManagementView = () => import('../views/NodeManagementView.vue')
 
 export const routes = [
   // ── Top-level ────────────────────────────────────────────
   { path: '/',         component: DashboardView, meta: { title: 'Dashboard' } },
   { path: '/fleet',    component: ModelsView,    meta: { title: 'Fleet'     } },
   { path: '/settings', component: SettingsView,  meta: { title: 'Settings'  } },
+  { path: '/nodes',    component: NodeManagementView, meta: { title: 'Nodes' } },
 
   // ── Data domain ──────────────────────────────────────────
   { path: '/data/label',       component: LabelView,       meta: { title: 'Label'       } },
