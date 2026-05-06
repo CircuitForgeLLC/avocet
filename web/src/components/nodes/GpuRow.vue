@@ -26,7 +26,7 @@ function serviceState(svcName: string): 'running' | 'stopped' | 'assigned-only' 
   const cap = props.gpu.compute_cap ?? 0
   if (cap < svc.min_compute_cap) return 'incompatible'
   if (props.gpu.services_running.includes(svcName)) return 'running'
-  if (props.gpu.services_assigned.includes(svcName)) return 'stopped'
+  if (props.gpu.services_assigned.includes(svcName)) return 'assigned-only'
   return 'available'
 }
 

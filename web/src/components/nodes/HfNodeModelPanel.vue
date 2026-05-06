@@ -20,7 +20,6 @@ interface NodeProfile {
 
 const props = defineProps<{
   nodeId: string
-  servicesCatalog: Record<string, { min_compute_cap: number; max_mb: number; catalog_size: number }>
 }>()
 
 const profile = ref<NodeProfile | null>(null)

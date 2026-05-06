@@ -52,11 +52,7 @@ const showHf = ref(false)
     </div>
 
     <OllamaModelPanel v-if="showOllama" :node-id="node.node_id" />
-    <HfNodeModelPanel
-      v-if="showHf"
-      :node-id="node.node_id"
-      :services-catalog="node.services_catalog"
-    />
+    <HfNodeModelPanel v-if="showHf" :node-id="node.node_id" />
   </section>
 </template>
 

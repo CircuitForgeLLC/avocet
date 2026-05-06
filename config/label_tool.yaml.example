@@ -110,12 +110,3 @@ imitate:
       sample_endpoint: /api/listings
       text_fields: [title, description, seller_info]
       prompt_template: "Evaluate the trustworthiness of this listing and flag any red flags:\n\n{text}"
-
-    - id: osprey
-      name: Osprey
-      icon: "📞"
-      description: Gov't hold-line automation
-      base_url: http://localhost:8520
-      sample_endpoint: /api/calls/recent
-      text_fields: [agency, issue, notes]
-      prompt_template: "Draft a concise summary of this government call record:\n\n{text}"
