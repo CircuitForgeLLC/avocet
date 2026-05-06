@@ -16,7 +16,6 @@ from urllib.parse import urlparse
 
 import yaml
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +97,7 @@ def _get_ollama_url(node_id: str) -> str:
             return f"{parsed.scheme}://{parsed.hostname}:11434"
     raise HTTPException(
         status_code=404,
-        detail=f"Cannot determine Ollama URL for node {node_id} — no agent_url in profile",
+        detail=f"Cannot determine Ollama URL for node {node_id}: no agent_url in profile",
     )
 
 

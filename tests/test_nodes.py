@@ -1,9 +1,7 @@
 """Tests for app/nodes.py — /api/nodes-mgmt/* endpoints."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
