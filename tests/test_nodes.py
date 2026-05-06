@@ -164,3 +164,37 @@ def test_list_nodes_marks_running_services(client, tmp_path):
 
     data = r.json()
     assert data[0]["gpus"][0]["services_running"] == ["cf-text"]
+
+
+# ── GET /api/nodes-mgmt/nodes/{node_id}/profile ────────────────────────────────
+
+def test_get_profile_returns_parsed_yaml(client, tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {"profiles_dir": str(profiles_dir)})
+    profile = {
+        "services": {"cf-text": {"min_compute_cap": 7.0, "max_mb": 8192, "catalog": {}}},
+        "nodes": {"heimdall": {"gpus": [], "agent_url": "http://10.1.10.71:7701"}},
+    }
+    _write_profile(profiles_dir, "heimdall", profile)
+
+    r = client.get("/api/nodes-mgmt/nodes/heimdall/profile")
+    assert r.status_code == 200
+    data = r.json()
+    assert "services" in data
+    assert "cf-text" in data["services"]
+
+
+def test_get_profile_404_when_missing(client, tmp_path):
+    _write_config(tmp_path, {"profiles_dir": str(tmp_path / "profiles")})
+    r = client.get("/api/nodes-mgmt/nodes/nonexistent/profile")
+    assert r.status_code == 404
+
+
+def test_get_profile_500_on_malformed_yaml(client, tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    _write_config(tmp_path, {"profiles_dir": str(profiles_dir)})
+    (profiles_dir / "bad.yaml").write_text("key: [unclosed", encoding="utf-8")
+
+    r = client.get("/api/nodes-mgmt/nodes/bad/profile")
+    assert r.status_code == 500
