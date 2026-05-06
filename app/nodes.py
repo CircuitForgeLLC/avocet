@@ -105,12 +105,84 @@ def _get_ollama_url(node_id: str) -> str:
 
 @router.get("/nodes")
 def list_nodes() -> list:
-    """List all nodes visible to the cf-orch coordinator.
+    """Return all nodes with live GPU stats merged with profile YAML."""
+    import httpx
 
-    Returns an empty list if no coordinator_url is configured.
-    Full implementation arrives in Task 2 (live coordinator proxy).
-    """
     cfg = _load_config()
-    if not cfg.get("coordinator_url"):
+    coordinator_url = cfg.get("coordinator_url", "") or ""
+    if not coordinator_url:
         return []
-    return []  # full implementation in Task 2
+
+    try:
+        r = httpx.get(f"{coordinator_url}/api/nodes", timeout=5.0)
+        r.raise_for_status()
+        coord_nodes: list[dict] = r.json()
+    except (httpx.HTTPError, httpx.ConnectError) as exc:
+        logger.warning("Coordinator unreachable: %s", exc)
+        return []
+
+    try:
+        sr = httpx.get(f"{coordinator_url}/api/services", timeout=5.0)
+        sr.raise_for_status()
+        services_data: list[dict] = sr.json()
+    except Exception:
+        services_data = []
+
+    # Build per-node, per-GPU running services map
+    running: dict[str, dict[int, list[str]]] = {}
+    for svc in services_data:
+        nid = svc.get("node_id", "")
+        gid = svc.get("gpu_id")
+        svc_name = svc.get("service", "")
+        if nid and gid is not None and svc_name:
+            running.setdefault(nid, {}).setdefault(gid, []).append(svc_name)
+
+    result = []
+    for node in coord_nodes:
+        node_id = node.get("node_id", "") or node.get("id", "")
+        profile = _load_profile(node_id) if node_id else None
+        profile_loaded = profile is not None
+
+        gpus = []
+        for gpu in (node.get("gpus", []) or []):
+            gpu_id = gpu.get("gpu_id", gpu.get("id", 0))
+            services_assigned: list[str] = []
+            if profile:
+                node_entry = (profile.get("nodes", {}) or {}).get(node_id, {}) or {}
+                for g in (node_entry.get("gpus", []) or []):
+                    if isinstance(g, dict) and g.get("id") == gpu_id:
+                        services_assigned = g.get("services", []) or []
+                        break
+            gpus.append({
+                "gpu_id": gpu_id,
+                "card": gpu.get("card", ""),
+                "vram_total_mb": gpu.get("vram_total_mb", 0),
+                "vram_used_mb": gpu.get("vram_used_mb", 0),
+                "vram_free_mb": gpu.get("vram_free_mb", 0),
+                "temp_c": gpu.get("temp_c"),
+                "utilization_pct": gpu.get("utilization_pct"),
+                "compute_cap": gpu.get("compute_cap"),
+                "services_assigned": services_assigned,
+                "services_running": running.get(node_id, {}).get(gpu_id, []),
+            })
+
+        services_catalog: dict = {}
+        if profile:
+            for svc_name, svc_info in (profile.get("services", {}) or {}).items():
+                catalog = svc_info.get("catalog", {}) or {}
+                services_catalog[svc_name] = {
+                    "min_compute_cap": svc_info.get("min_compute_cap", 0.0),
+                    "max_mb": svc_info.get("max_mb", 0),
+                    "catalog_size": len(catalog),
+                }
+
+        result.append({
+            "node_id": node_id,
+            "online": node.get("online", True),
+            "agent_url": node.get("agent_url", ""),
+            "gpus": gpus,
+            "profile_loaded": profile_loaded,
+            "services_catalog": services_catalog,
+        })
+
+    return result
