@@ -10,6 +10,7 @@ Module-level globals follow the set_config_dir() testability pattern from cforch
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -335,7 +336,6 @@ def pull_ollama_model(node_id: str, body: PullRequest) -> StreamingResponse:
                     if line:
                         yield f"data: {line}\n\n"
         except Exception as exc:
-            import json
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
