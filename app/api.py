@@ -46,6 +46,9 @@ app.include_router(dashboard_router, prefix="/api")
 from app.models import router as models_router
 app.include_router(models_router, prefix="/api/models")
 
+from app.nodes import router as nodes_router
+app.include_router(nodes_router, prefix="/api/nodes-mgmt")
+
 # -- Static SPA -- MUST be last (catches all unmatched paths) ---------------
 
 _ROOT = Path(__file__).parent.parent

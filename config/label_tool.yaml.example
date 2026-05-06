@@ -52,6 +52,10 @@ cforch:
   # Or set CF_JUDGE_URL. Populates the Judge URL field in the LLM Eval UI automatically.
   # hf_token:        hf_xxxxxxxxxxxxxxxxxxxx  # HuggingFace token — required for gated/terms-restricted models
 
+  # Directory containing per-node profile YAMLs (cf-orch node profiles).
+  # Default: derived from bench_script location (../../profiles/nodes).
+  # profiles_dir: /Library/Development/CircuitForge/circuitforge-orch/circuitforge_orch/profiles/nodes
+
 # Imitate tab — pull real samples from sibling CF product APIs and run them
 # through local LLMs to build a corrections dataset.
 # ollama_url defaults to cforch.ollama_url if omitted here.
