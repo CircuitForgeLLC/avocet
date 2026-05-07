@@ -45,7 +45,7 @@ def _config_file() -> Path:
     return _ROOT / "config" / "label_tool.yaml"
 
 
-def _load_config() -> dict:
+def _load_config() -> dict[str, Any]:
     f = _config_file()
     if not f.exists():
         return {}
@@ -73,6 +73,10 @@ def _ratings_path() -> Path:
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
+    if len(a) != len(b):
+        raise ValueError(
+            f"Embedding dimension mismatch: {len(a)} vs {len(b)}"
+        )
     dot = sum(x * y for x, y in zip(a, b))
     mag_a = math.sqrt(sum(x * x for x in a))
     mag_b = math.sqrt(sum(x * x for x in b))

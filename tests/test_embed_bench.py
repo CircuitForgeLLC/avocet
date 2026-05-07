@@ -48,3 +48,8 @@ def test_cosine_orthogonal():
 def test_cosine_opposite():
     from app.eval.embed_bench import _cosine
     assert _cosine([1.0, 0.0], [-1.0, 0.0]) == pytest.approx(-1.0)
+
+
+def test_cosine_zero_vector_returns_zero():
+    from app.eval.embed_bench import _cosine
+    assert _cosine([0.0, 0.0], [1.0, 0.0]) == pytest.approx(0.0)
