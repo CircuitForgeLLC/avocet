@@ -73,7 +73,7 @@ def test_models_returns_list_with_mock(client, tmp_path):
     }
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("httpx.get", return_value=mock_resp):
+    with patch("app.eval.embed_bench.httpx.get", return_value=mock_resp):
         r = client.get("/api/embed-bench/models")
 
     assert r.status_code == 200
@@ -85,7 +85,7 @@ def test_models_returns_list_with_mock(client, tmp_path):
 def test_models_returns_empty_on_ollama_error(client, tmp_path):
     """GET /api/embed-bench/models returns empty list if Ollama unreachable."""
     import httpx
-    with patch("httpx.get", side_effect=httpx.ConnectError("refused")):
+    with patch("app.eval.embed_bench.httpx.get", side_effect=httpx.ConnectError("refused")):
         r = client.get("/api/embed-bench/models")
     assert r.status_code == 200
     assert r.json()["models"] == []

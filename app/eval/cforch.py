@@ -12,6 +12,8 @@ Route prefixes when mounted at /api in api.py:
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter
 
 from app.cforch import router as _cforch_router
@@ -28,7 +30,7 @@ router.include_router(_plans_router, prefix="/plans-bench")
 router.include_router(_embed_router, prefix="/embed-bench")
 
 
-def set_config_dir(path) -> None:
+def set_config_dir(path: Path | None) -> None:
     """Propagate config dir override to all sub-modules -- used by tests."""
     import app.cforch as _cforch_mod
     import app.style as _style_mod

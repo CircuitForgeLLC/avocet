@@ -100,6 +100,8 @@ def get_models() -> dict:
                 "name": entry.get("name", ""),
                 "size": entry.get("size", 0),
             })
-    except Exception as exc:
-        logger.warning("Failed to list Ollama models: %s", exc)
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Ollama /api/tags returned HTTP %s: %s", exc.response.status_code, exc)
+    except httpx.RequestError as exc:
+        logger.warning("Failed to reach Ollama for model list: %s", exc)
     return {"models": models, "ollama_url": ollama}
