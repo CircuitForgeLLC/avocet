@@ -105,3 +105,110 @@ def get_models() -> dict:
     except httpx.RequestError as exc:
         logger.warning("Failed to reach Ollama for model list: %s", exc)
     return {"models": models, "ollama_url": ollama}
+
+
+# ── POST /run ─────────────────────────────────────────────────────────────────
+
+class RunRequest(BaseModel):
+    corpus: list[str]
+    queries: list[str]
+    models: list[str]
+    top_k: int = 5
+    ollama_url: str = ""
+
+    @field_validator("corpus")
+    @classmethod
+    def corpus_nonempty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("corpus must not be empty")
+        return v
+
+    @field_validator("queries")
+    @classmethod
+    def queries_nonempty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("queries must not be empty")
+        return v
+
+    @field_validator("models")
+    @classmethod
+    def models_nonempty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("models must contain at least one model name")
+        return v
+
+
+def _embed_texts(ollama: str, model: str, texts: list[str]) -> list[list[float]]:
+    """Batch-embed texts via Ollama /v1/embeddings. Returns one vector per text."""
+    resp = httpx.post(
+        f"{ollama}/v1/embeddings",
+        json={"model": model, "input": texts},
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    data = resp.json().get("data", [])
+    return [item["embedding"] for item in data]
+
+
+def _sse(event: dict) -> str:
+    return f"data: {json.dumps(event)}\n\n"
+
+
+@router.post("/run")
+def run_embed_bench(req: RunRequest) -> StreamingResponse:
+    """Embed corpus + queries with each model; stream SSE results."""
+    global _RUN_ACTIVE
+
+    if _RUN_ACTIVE:
+        raise HTTPException(409, "An embedding benchmark run is already active")
+
+    ollama = req.ollama_url or _ollama_url()
+
+    def _generate():
+        global _RUN_ACTIVE
+        _RUN_ACTIVE = True
+        try:
+            for model_idx, model in enumerate(req.models, start=1):
+                yield _sse({
+                    "type": "progress",
+                    "msg": f"Indexing corpus with {model} ({model_idx}/{len(req.models)})...",
+                })
+                try:
+                    corpus_vecs = _embed_texts(ollama, model, req.corpus)
+                except Exception as exc:
+                    yield _sse({"type": "error", "msg": f"Ollama error for {model}: {exc}"})
+                    continue
+
+                yield _sse({
+                    "type": "progress",
+                    "msg": f"Running queries with {model}...",
+                })
+
+                for q_idx, query in enumerate(req.queries):
+                    try:
+                        q_vecs = _embed_texts(ollama, model, [query])
+                    except Exception as exc:
+                        yield _sse({"type": "error", "msg": f"Query embed error ({model}): {exc}"})
+                        continue
+                    q_vec = q_vecs[0]
+                    scored = sorted(
+                        [
+                            {"chunk_idx": i, "text": chunk, "score": round(_cosine(q_vec, cv), 4)}
+                            for i, (chunk, cv) in enumerate(zip(req.corpus, corpus_vecs))
+                        ],
+                        key=lambda h: h["score"],
+                        reverse=True,
+                    )[: req.top_k]
+                    yield _sse({
+                        "type": "result",
+                        "query_idx": q_idx,
+                        "query": query,
+                        "model": model,
+                        "hits": scored,
+                    })
+
+            yield _sse({"type": "done"})
+        finally:
+            _RUN_ACTIVE = False
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")

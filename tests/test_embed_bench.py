@@ -1,6 +1,7 @@
 """Tests for app/eval/embed_bench.py."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -89,3 +90,88 @@ def test_models_returns_empty_on_ollama_error(client, tmp_path):
         r = client.get("/api/embed-bench/models")
     assert r.status_code == 200
     assert r.json()["models"] == []
+
+
+# ── run endpoint ───────────────────────────────────────────────────────────────
+
+def test_run_empty_corpus_returns_422(client):
+    r = client.post("/api/embed-bench/run", json={
+        "corpus": [], "queries": ["test"], "models": ["nomic-embed-text"], "top_k": 3
+    })
+    assert r.status_code == 422
+
+
+def test_run_empty_queries_returns_422(client):
+    r = client.post("/api/embed-bench/run", json={
+        "corpus": ["chunk 1"], "queries": [], "models": ["nomic-embed-text"], "top_k": 3
+    })
+    assert r.status_code == 422
+
+
+def test_run_empty_models_returns_422(client):
+    r = client.post("/api/embed-bench/run", json={
+        "corpus": ["chunk 1"], "queries": ["test"], "models": [], "top_k": 3
+    })
+    assert r.status_code == 422
+
+
+def _fake_embed_response(texts: list[str]) -> MagicMock:
+    """Build a mock httpx.post response returning unit vectors for each text."""
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {
+        "data": [{"embedding": [1.0, 0.0, 0.0] if i % 2 == 0 else [0.0, 1.0, 0.0]}
+                 for i, _ in enumerate(texts)]
+    }
+    return resp
+
+
+def _collect_sse(raw: bytes) -> list[dict]:
+    """Parse SSE stream bytes into a list of decoded event dicts."""
+    events = []
+    for line in raw.decode().splitlines():
+        if line.startswith("data: "):
+            events.append(json.loads(line[6:]))
+    return events
+
+
+def test_run_single_model_returns_result_and_done(client, tmp_path):
+    import yaml
+    (tmp_path / "label_tool.yaml").write_text(yaml.dump({"cforch": {"ollama_url": "http://localhost:11434"}}))
+
+    with patch("app.eval.embed_bench.httpx.post", return_value=_fake_embed_response(["chunk 1", "chunk 2"])):
+        r = client.post("/api/embed-bench/run", json={
+            "corpus": ["chunk 1", "chunk 2"],
+            "queries": ["what is chunk one?"],
+            "models": ["nomic-embed-text"],
+            "top_k": 2,
+        })
+
+    assert r.status_code == 200
+    events = _collect_sse(r.content)
+    types = [e["type"] for e in events]
+    assert "result" in types
+    assert types[-1] == "done"
+    result_events = [e for e in events if e["type"] == "result"]
+    assert result_events[0]["model"] == "nomic-embed-text"
+    assert result_events[0]["query_idx"] == 0
+    assert len(result_events[0]["hits"]) <= 2
+
+
+def test_run_two_models_returns_two_result_events_per_query(client, tmp_path):
+    import yaml
+    (tmp_path / "label_tool.yaml").write_text(yaml.dump({"cforch": {"ollama_url": "http://localhost:11434"}}))
+
+    with patch("app.eval.embed_bench.httpx.post", return_value=_fake_embed_response(["chunk A", "chunk B"])):
+        r = client.post("/api/embed-bench/run", json={
+            "corpus": ["chunk A", "chunk B"],
+            "queries": ["find it"],
+            "models": ["nomic-embed-text", "mxbai-embed-large"],
+            "top_k": 2,
+        })
+
+    events = _collect_sse(r.content)
+    result_events = [e for e in events if e["type"] == "result"]
+    models_seen = {e["model"] for e in result_events}
+    assert "nomic-embed-text" in models_seen
+    assert "mxbai-embed-large" in models_seen
