@@ -83,3 +83,23 @@ def _cosine(a: list[float], b: list[float]) -> float:
     if mag_a == 0.0 or mag_b == 0.0:
         return 0.0
     return dot / (mag_a * mag_b)
+
+
+# ── GET /models ───────────────────────────────────────────────────────────────
+
+@router.get("/models")
+def get_models() -> dict:
+    """Return Ollama embedding models available on the configured instance."""
+    ollama = _ollama_url()
+    models: list[dict] = []
+    try:
+        resp = httpx.get(f"{ollama}/api/tags", timeout=5.0)
+        resp.raise_for_status()
+        for entry in resp.json().get("models", []):
+            models.append({
+                "name": entry.get("name", ""),
+                "size": entry.get("size", 0),
+            })
+    except Exception as exc:
+        logger.warning("Failed to list Ollama models: %s", exc)
+    return {"models": models, "ollama_url": ollama}
