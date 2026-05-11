@@ -110,3 +110,19 @@ imitate:
       sample_endpoint: /api/listings
       text_fields: [title, description, seller_info]
       prompt_template: "Evaluate the trustworthiness of this listing and flag any red flags:\n\n{text}"
+
+    - id: pagepiper
+      name: Pagepiper
+      icon: "📄"
+      description: "PDF/rulebook RAG tool: page-level text chunks"
+      base_url: http://localhost:8511
+      health_path: /api/health
+      sample_endpoint: /api/library
+      chunk_endpoint: /api/library/sample-chunks?limit=50   # requires pagepiper#6
+      text_fields: [title]
+      prompt_template: "Summarize the key rules described in this passage:\n\n{text}"
+
+# ── Embedding model comparison harness ────────────────────────────────────────
+embed_bench:
+  # ollama_url: http://localhost:11434   # optional; falls back to cforch.ollama_url
+  # top_k: 5                            # default hits per model per query
