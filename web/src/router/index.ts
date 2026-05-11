@@ -30,6 +30,7 @@ export const routes = [
   // ── Eval domain ──────────────────────────────────────────
   { path: '/eval/benchmark', component: BenchmarkView, meta: { title: 'Benchmark' } },
   { path: '/eval/compare',   component: CompareView,   meta: { title: 'Compare'   } },
+  { path: '/eval/embed-compare', component: () => import('../views/EmbedCompareView.vue'), meta: { title: 'Embed Compare' } },
 
   // ── Train domain ─────────────────────────────────────────
   { path: '/train/jobs',    component: TrainJobsView,    meta: { title: 'Training Jobs'    } },

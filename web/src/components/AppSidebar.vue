@@ -223,8 +223,9 @@ const dataItems: NavItem[] = [
 ]
 
 const evalItems: NavItem[] = [
-  { path: '/eval/benchmark', icon: '📊', label: 'Benchmark' },
-  { path: '/eval/compare',   icon: '🔍', label: 'Compare'   },
+  { path: '/eval/benchmark',     icon: '📊', label: 'Benchmark'     },
+  { path: '/eval/compare',       icon: '🔍', label: 'Compare'       },
+  { path: '/eval/embed-compare', icon: '🧮', label: 'Embed Compare' },
 ]
 
 const trainItems: NavItem[] = [
