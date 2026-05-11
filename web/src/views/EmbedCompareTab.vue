@@ -135,15 +135,109 @@
       </p>
     </section>
 
-    <!-- Results (Task 8) -->
+    <!-- Results -->
     <section
       v-if="hasResults"
       class="card results-section"
       aria-labelledby="results-heading"
     >
       <h2 id="results-heading">Results</h2>
-      <!-- Populated in Task 8 -->
-      <p class="muted">{{ resultEvents.length }} result events received.</p>
+
+      <!-- Query pagination -->
+      <div class="query-nav" role="navigation" aria-label="Query navigation">
+        <button
+          class="btn-secondary"
+          aria-label="Previous query"
+          :disabled="currentQueryIdx === 0"
+          @click="currentQueryIdx--"
+        >‹</button>
+        <span class="query-counter">
+          Query {{ currentQueryIdx + 1 }} of {{ uniqueQueries.length }}:
+          <em>{{ uniqueQueries[currentQueryIdx] }}</em>
+        </span>
+        <button
+          class="btn-secondary"
+          aria-label="Next query"
+          :disabled="currentQueryIdx >= uniqueQueries.length - 1"
+          @click="currentQueryIdx++"
+        >›</button>
+      </div>
+
+      <!-- Results table: one column per model -->
+      <div class="table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th scope="col" class="rank-col">#</th>
+              <th
+                v-for="model in selectedModels"
+                :key="model"
+                scope="col"
+              >{{ model }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="rank in topK" :key="rank">
+              <td class="rank-col muted">{{ rank }}</td>
+              <td
+                v-for="model in selectedModels"
+                :key="model"
+                class="hit-cell"
+              >
+                <template v-if="getHit(currentQueryIdx, model, rank - 1) as hit">
+                  <div class="hit-text">{{ hit.text }}</div>
+                  <!-- Visual score bar: decorative only -->
+                  <div class="score-row">
+                    <div class="score-bar-wrap" aria-hidden="true">
+                      <div class="score-bar" :style="{ width: `${hit.score * 100}%` }" />
+                    </div>
+                    <span class="score-label">{{ hit.score.toFixed(3) }}</span>
+                  </div>
+                  <!-- Rating buttons -->
+                  <div class="rating-row">
+                    <button
+                      class="rate-btn"
+                      :class="{ active: getRating(currentQueryIdx, model, hit.chunk_idx) === 'relevant' }"
+                      :aria-pressed="getRating(currentQueryIdx, model, hit.chunk_idx) === 'relevant'"
+                      aria-label="Mark as relevant"
+                      @click="rate(currentQueryIdx, model, hit, 'relevant')"
+                    >
+                      👍 Relevant
+                    </button>
+                    <button
+                      class="rate-btn rate-btn-neg"
+                      :class="{ active: getRating(currentQueryIdx, model, hit.chunk_idx) === 'not_relevant' }"
+                      :aria-pressed="getRating(currentQueryIdx, model, hit.chunk_idx) === 'not_relevant'"
+                      aria-label="Mark as not relevant"
+                      @click="rate(currentQueryIdx, model, hit, 'not_relevant')"
+                    >
+                      👎 Not relevant
+                    </button>
+                  </div>
+                </template>
+                <span v-else class="muted">—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Export -->
+    <section
+      v-if="hasResults"
+      class="card export-section"
+      aria-labelledby="export-heading"
+    >
+      <h2 id="export-heading">Export Ratings</h2>
+      <div class="export-row">
+        <fieldset class="export-format-group">
+          <legend>Format</legend>
+          <label><input type="radio" v-model="exportFormat" value="csv" /> CSV</label>
+          <label><input type="radio" v-model="exportFormat" value="json" /> JSON</label>
+        </fieldset>
+        <button class="btn-secondary" @click="exportRatings">Export</button>
+      </div>
     </section>
   </div>
 </template>
@@ -183,6 +277,21 @@ const running         = ref(false)
 const liveMessage     = ref('')
 const resultEvents    = ref<ResultEvent[]>([])
 const runController   = ref<AbortController | null>(null)
+
+const currentQueryIdx  = ref(0)
+const exportFormat     = ref<'csv' | 'json'>('csv')
+
+type RatingMap = Record<string, Record<string, Record<number, 'relevant' | 'not_relevant'>>>
+const ratings = ref<RatingMap>({})
+
+const uniqueQueries = computed(() => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const e of resultEvents.value) {
+    if (!seen.has(e.query)) { seen.add(e.query); out.push(e.query) }
+  }
+  return out
+})
 
 const hasResults = computed(() => resultEvents.value.length > 0)
 const canRun = computed(
@@ -311,6 +420,67 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1_000_000_000).toFixed(1)} GB`
 }
 
+function getHit(queryIdx: number, model: string, rank: number): HitResult | null {
+  const query = uniqueQueries.value[queryIdx]
+  if (!query) return null
+  const ev = resultEvents.value.find(e => e.query === query && e.model === model)
+  return ev?.hits[rank] ?? null
+}
+
+function getRating(queryIdx: number, model: string, chunkIdx: number): string | undefined {
+  const query = uniqueQueries.value[queryIdx]
+  return ratings.value[query]?.[model]?.[chunkIdx]
+}
+
+async function rate(
+  queryIdx: number,
+  model: string,
+  hit: HitResult,
+  rating: 'relevant' | 'not_relevant',
+) {
+  const query = uniqueQueries.value[queryIdx]
+  // Optimistic update
+  if (!ratings.value[query]) ratings.value[query] = {}
+  if (!ratings.value[query][model]) ratings.value[query][model] = {}
+  ratings.value[query][model][hit.chunk_idx] = rating
+
+  try {
+    await fetch('/api/embed-bench/rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        model,
+        chunk_text: hit.text,
+        chunk_idx: hit.chunk_idx,
+        rating,
+      }),
+    })
+    liveMessage.value = `Rated chunk ${hit.chunk_idx + 1} as ${rating}.`
+  } catch (err) {
+    liveMessage.value = `Rating failed: ${err}`
+  }
+}
+
+async function exportRatings() {
+  const r = await fetch(`/api/embed-bench/export?format=${exportFormat.value}`)
+  if (!r.ok) {
+    liveMessage.value = `Export failed: HTTP ${r.status}`
+    return
+  }
+  const blob = await r.blob()
+  const disposition = r.headers.get('Content-Disposition') ?? ''
+  const filenameMatch = disposition.match(/filename="([^"]+)"/)
+  const filename = filenameMatch ? filenameMatch[1] : `embed_comparison.${exportFormat.value}`
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+  liveMessage.value = `Exported ${filename}.`
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 onMounted(() => {
@@ -430,5 +600,106 @@ textarea, input[type="number"] {
   .import-row { flex-direction: column; align-items: flex-start; }
   .run-row { flex-direction: column; }
   .model-list { flex-direction: column; }
+}
+
+/* Results table */
+.table-wrap { overflow-x: auto; }
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.results-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--color-surface-raised, #e4ebf5);
+  border-bottom: 2px solid var(--color-border, #d0d7e8);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 700;
+  white-space: nowrap;
+  z-index: 1;
+}
+.results-table td {
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border, #d0d7e8);
+}
+.rank-col { width: 2rem; text-align: center; }
+
+.hit-text { margin-bottom: 0.25rem; line-height: 1.4; }
+
+.score-row { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem; }
+.score-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: var(--color-border, #d0d7e8);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.score-bar {
+  height: 100%;
+  background: var(--app-primary, #2A6080);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.score-label { font-size: 0.75rem; color: var(--color-text-muted, #4a5c7a); min-width: 3rem; text-align: right; }
+
+.rating-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.rate-btn {
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: var(--color-surface, #f0f4fb);
+  color: var(--color-text, #1a2338);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.rate-btn.active {
+  background: color-mix(in srgb, var(--app-primary, #2A6080) 20%, transparent);
+  border-color: var(--app-primary, #2A6080);
+  font-weight: 700;
+}
+.rate-btn-neg.active {
+  background: color-mix(in srgb, var(--color-error, #c0392b) 15%, transparent);
+  border-color: var(--color-error, #c0392b);
+}
+
+/* Query nav */
+.query-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.query-counter { font-size: 0.875rem; flex: 1; }
+
+/* Export */
+.export-row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+.export-format-group {
+  border: none;
+  padding: 0;
+  display: flex;
+  gap: 0.75rem;
+}
+.export-format-group legend {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  float: left;
+  margin-right: 0.5rem;
+}
+.export-format-group label { font-size: 0.875rem; display: flex; align-items: center; gap: 0.3rem; }
+
+@media (max-width: 768px) {
+  .results-table thead th,
+  .results-table td { padding: 0.35rem 0.4rem; font-size: 0.8rem; }
+  .query-nav { flex-direction: column; align-items: flex-start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .score-bar { transition: none; }
 }
 </style>
