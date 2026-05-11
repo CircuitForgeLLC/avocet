@@ -212,3 +212,82 @@ def run_embed_bench(req: RunRequest) -> StreamingResponse:
             _RUN_ACTIVE = False
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
+
+
+# ── POST /rate ────────────────────────────────────────────────────────────────
+
+_VALID_RATINGS = {"relevant", "not_relevant"}
+
+
+class RatingRequest(BaseModel):
+    query: str
+    model: str
+    chunk_text: str
+    chunk_idx: int
+    rating: str
+
+    @field_validator("rating")
+    @classmethod
+    def rating_valid(cls, v: str) -> str:
+        if v not in _VALID_RATINGS:
+            raise ValueError(f"rating must be one of {_VALID_RATINGS}")
+        return v
+
+
+@router.post("/rate")
+def rate_result(req: RatingRequest) -> dict:
+    """Append one rating to the JSONL ratings file."""
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "query": req.query,
+        "model": req.model,
+        "chunk_idx": req.chunk_idx,
+        "chunk_text": req.chunk_text,
+        "rating": req.rating,
+    }
+    path = _ratings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry) + "\n")
+    return {"ok": True}
+
+
+# ── GET /export ───────────────────────────────────────────────────────────────
+
+_CSV_FIELDS = ["timestamp", "query", "model", "chunk_idx", "chunk_text", "rating"]
+
+
+@router.get("/export")
+def export_ratings(format: str = "csv") -> Any:
+    """Download ratings as CSV or JSON."""
+    path = _ratings_path()
+    rows: list[dict] = []
+    if path.exists():
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            raw = raw.strip()
+            if raw:
+                try:
+                    rows.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    pass
+
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    if format == "json":
+        content = json.dumps(rows, ensure_ascii=False, indent=2)
+        return StreamingResponse(
+            iter([content]),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="embed_comparison_{date_str}.json"'},
+        )
+
+    # Default: CSV
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_CSV_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="embed_comparison_{date_str}.csv"'},
+    )

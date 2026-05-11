@@ -175,3 +175,60 @@ def test_run_two_models_returns_two_result_events_per_query(client, tmp_path):
     models_seen = {e["model"] for e in result_events}
     assert "nomic-embed-text" in models_seen
     assert "mxbai-embed-large" in models_seen
+
+
+# ── rate + export ──────────────────────────────────────────────────────────────
+
+def test_rate_appends_jsonl_line(client, tmp_path):
+    r = client.post("/api/embed-bench/rate", json={
+        "query": "test query",
+        "model": "nomic-embed-text",
+        "chunk_text": "some text",
+        "chunk_idx": 2,
+        "rating": "relevant",
+    })
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    ratings_file = tmp_path / "embed_bench_ratings.jsonl"
+    assert ratings_file.exists()
+    line = json.loads(ratings_file.read_text().strip())
+    assert line["query"] == "test query"
+    assert line["rating"] == "relevant"
+    assert line["chunk_idx"] == 2
+    assert "timestamp" in line
+
+
+def test_export_csv_two_rows(client, tmp_path):
+    for i in range(2):
+        client.post("/api/embed-bench/rate", json={
+            "query": f"q{i}", "model": "nomic-embed-text",
+            "chunk_text": f"chunk {i}", "chunk_idx": i, "rating": "relevant",
+        })
+    r = client.get("/api/embed-bench/export?format=csv")
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    lines = r.text.strip().splitlines()
+    assert len(lines) == 3          # header + 2 rows
+    assert "query" in lines[0]
+
+
+def test_export_json_two_entries(client, tmp_path):
+    for i in range(2):
+        client.post("/api/embed-bench/rate", json={
+            "query": f"q{i}", "model": "nomic-embed-text",
+            "chunk_text": f"chunk {i}", "chunk_idx": i, "rating": "not_relevant",
+        })
+    r = client.get("/api/embed-bench/export?format=json")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+    assert len(data) == 2
+    assert data[0]["rating"] == "not_relevant"
+
+
+def test_export_empty_returns_csv_header_only(client):
+    r = client.get("/api/embed-bench/export?format=csv")
+    assert r.status_code == 200
+    lines = r.text.strip().splitlines()
+    assert len(lines) == 1          # header only
+    assert "query" in lines[0]
