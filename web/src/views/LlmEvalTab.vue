@@ -302,7 +302,7 @@ const llmModelBadge = computed(() => {
 const llmTaskTypeCols = computed(() => {
   const types = new Set<string>()
   for (const r of llmResults.value) {
-    for (const k of Object.keys(r.quality_by_task_type)) types.add(k)
+    for (const k of Object.keys(r.quality_by_task_type ?? {})) types.add(k)
   }
   return [...types].sort()
 })
@@ -338,7 +338,7 @@ const llmBestByCol = computed((): Record<string, string> => {
   for (const col of llmTaskTypeCols.value) {
     bestId = ''; bestVal = -Infinity
     for (const r of llmResults.value) {
-      const v = r.quality_by_task_type[col]
+      const v = r.quality_by_task_type?.[col]
       if (v != null && v > bestVal) { bestVal = v; bestId = r.model_id }
     }
     best[col] = bestId

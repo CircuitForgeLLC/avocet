@@ -28,9 +28,6 @@
             <span class="metric-label"> labeled since last eval</span>
           </p>
         </div>
-        <div v-if="data.signals.data_to_eval" class="card-cta">
-          <RouterLink to="/eval/benchmark" class="cta-btn">Run Eval</RouterLink>
-        </div>
       </div>
 
       <!-- ② Eval card -->
@@ -40,17 +37,27 @@
           <h2 class="card-title">Eval</h2>
         </div>
         <div class="card-body">
-          <p class="card-metric">
-            <span class="metric-label">Last run: </span>
-            <strong class="metric-value">{{ formattedEvalTime }}</strong>
-          </p>
-          <p v-if="data.last_eval_best_score != null" class="card-metric">
-            <span class="metric-label">Best score: </span>
-            <strong class="metric-value">{{ formatScore(data.last_eval_best_score) }}</strong>
-          </p>
+          <div class="bench-run-table">
+            <div
+              v-for="(run, type) in data.recent_bench_runs"
+              :key="type"
+              class="bench-run-row"
+            >
+              <span class="bench-type-label">{{ BENCH_LABELS[type as BenchType] ?? type }}</span>
+              <span class="bench-run-time" :class="{ 'metric-muted': !run.timestamp }">
+                {{ run.timestamp ? formatBenchTs(run.timestamp) : '—' }}
+              </span>
+              <span v-if="run.score != null" class="bench-run-score">
+                {{ formatScore(run.score) }}
+              </span>
+            </div>
+          </div>
         </div>
         <div v-if="data.signals.eval_to_train" class="card-cta">
           <RouterLink to="/train/jobs" class="cta-btn">Queue Finetune</RouterLink>
+        </div>
+        <div v-if="data.signals.data_to_eval" class="card-cta">
+          <RouterLink to="/eval/benchmark" class="cta-btn">Run Eval</RouterLink>
         </div>
       </div>
 
@@ -104,33 +111,49 @@ interface DashboardSignals {
   train_to_fleet: boolean
 }
 
+interface BenchRun {
+  timestamp: string | null
+  metric: string | null
+  score: number | null
+}
+
+type BenchType = 'classifier' | 'llm' | 'style' | 'plans'
+
 interface DashboardData {
   labeled_since_last_eval: number
   last_eval_timestamp: string | null
   last_eval_best_score: number | null
   active_jobs: ActiveJob[]
   corrections_export_ready: number
+  recent_bench_runs: Record<BenchType, BenchRun>
   signals: DashboardSignals
+}
+
+const BENCH_LABELS: Record<BenchType, string> = {
+  classifier: 'Classifier',
+  llm:        'LLM Eval',
+  style:      'Style',
+  plans:      'Planning',
 }
 
 const data    = ref<DashboardData | null>(null)
 const loading = ref(false)
 const error   = ref<string | null>(null)
 
-const formattedEvalTime = computed(() => {
-  if (!data.value?.last_eval_timestamp) return 'Never'
-  const date = new Date(data.value.last_eval_timestamp)
-  if (isNaN(date.getTime())) return 'Unknown'
-  const now = Date.now()
-  const diff = now - date.getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1)   return 'just now'
-  if (mins < 60)  return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24)   return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  return `${days}d ago`
-})
+function formatBenchTs(ts: string): string {
+  const date = new Date(ts)
+  if (!isNaN(date.getTime())) {
+    const diff = Date.now() - date.getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1)  return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24)  return `${hrs}h ago`
+    return `${Math.floor(hrs / 24)}d ago`
+  }
+  // Non-ISO: show as-is (plans bench uses "YYYY-MM-DD HH:MM")
+  return ts.length > 16 ? ts.slice(0, 16) : ts
+}
 
 function formatScore(score: number): string {
   return `${(score * 100).toFixed(1)}%`
@@ -284,6 +307,42 @@ onMounted(() => load())
 }
 
 .cta-btn:hover { background: color-mix(in srgb, var(--app-primary, #2A6080) 85%, black); }
+
+/* ── Bench run table ── */
+.bench-run-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.bench-run-row {
+  display: grid;
+  grid-template-columns: 6rem 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.bench-type-label {
+  font-weight: 600;
+  color: var(--color-text, #1a2338);
+  font-size: 0.78rem;
+}
+
+.bench-run-time {
+  color: var(--color-text-secondary, #6b7a99);
+  font-size: 0.78rem;
+}
+
+.bench-run-score {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--app-primary, #2A6080);
+  background: color-mix(in srgb, var(--app-primary, #2A6080) 10%, transparent);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+}
 
 /* ── Job pills ── */
 .job-row {

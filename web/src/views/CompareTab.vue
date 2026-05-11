@@ -71,32 +71,35 @@
         rows="6"
       />
 
-      <!-- Ollama model picker -->
+      <!-- LLM model picker (ollama + vllm + cf-text) -->
       <details class="model-picker" open>
         <summary class="picker-summary">
-          <span class="picker-title">🤖 Ollama Models</span>
-          <span class="picker-badge">{{ cmpSelectedModels.size }} / {{ ollamaLlmModels.length }}</span>
+          <span class="picker-title">🤖 LLM Models</span>
+          <span class="picker-badge">{{ cmpSelectedModels.size }} / {{ llmSelectableModels.length }}</span>
         </summary>
         <div class="picker-body">
           <label class="picker-cat-header">
             <input
               type="checkbox"
-              :checked="cmpSelectedModels.size === ollamaLlmModels.length"
-              :indeterminate="cmpSelectedModels.size > 0 && cmpSelectedModels.size < ollamaLlmModels.length"
+              :checked="cmpSelectedModels.size === llmSelectableModels.length"
+              :indeterminate="cmpSelectedModels.size > 0 && cmpSelectedModels.size < llmSelectableModels.length"
               @change="toggleAllCmpModels(($event.target as HTMLInputElement).checked)"
             />
-            <span class="picker-cat-name">All ollama models</span>
+            <span class="picker-cat-name">All LLM models</span>
           </label>
-          <div class="picker-model-list">
-            <label v-for="m in ollamaLlmModels" :key="m.id" class="picker-model-row">
-              <input
-                type="checkbox"
-                :checked="cmpSelectedModels.has(m.id)"
-                @change="toggleCmpModel(m.id, ($event.target as HTMLInputElement).checked)"
-              />
-              <span class="picker-model-name">{{ m.name }}</span>
-              <span class="picker-adapter-type">{{ m.tags.slice(0, 3).join(', ') }}</span>
-            </label>
+          <div v-for="(models, service) in llmModelsByService" :key="service" class="picker-category">
+            <span class="picker-cat-section">{{ service }}</span>
+            <div class="picker-model-list">
+              <label v-for="m in models" :key="m.id" class="picker-model-row">
+                <input
+                  type="checkbox"
+                  :checked="cmpSelectedModels.has(m.id)"
+                  @change="toggleCmpModel(m.id, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="picker-model-name">{{ m.name }}</span>
+                <span class="picker-adapter-type">{{ m.tags.slice(0, 2).join(', ') }}</span>
+              </label>
+            </div>
           </div>
         </div>
       </details>
@@ -232,9 +235,21 @@ const cmpResults          = ref<CmpResult[]>([])
 const cmpEventSource      = ref<EventSource | null>(null)
 
 // ── Computed ────────────────────────────────────────────────────────────────
-const ollamaLlmModels = computed(() =>
-  llmModels.value.filter(m => m.service === 'ollama')
+const LLM_SERVICES = new Set(['ollama', 'vllm', 'cf-text'])
+
+const llmSelectableModels = computed(() =>
+  llmModels.value.filter(m => LLM_SERVICES.has(m.service))
 )
+
+/** Group selectable models by service for the picker UI */
+const llmModelsByService = computed((): Record<string, CfOrchModel[]> => {
+  const groups: Record<string, CfOrchModel[]> = {}
+  for (const m of llmSelectableModels.value) {
+    if (!groups[m.service]) groups[m.service] = []
+    groups[m.service].push(m)
+  }
+  return groups
+})
 
 const llmTasksByType = computed((): Record<string, CfOrchTask[]> => {
   const groups: Record<string, CfOrchTask[]> = {}
@@ -270,7 +285,7 @@ function toggleCmpModel(id: string, checked: boolean) {
 
 function toggleAllCmpModels(checked: boolean) {
   cmpSelectedModels.value = checked
-    ? new Set(ollamaLlmModels.value.map(m => m.id))
+    ? new Set(llmSelectableModels.value.map(m => m.id))
     : new Set()
 }
 
@@ -288,9 +303,8 @@ async function loadLlmModels() {
   const { data } = await useApiFetch<{ models: CfOrchModel[] }>('/api/cforch/models')
   if (data?.models) {
     llmModels.value = data.models
-    // Pre-select all ollama models
     cmpSelectedModels.value = new Set(
-      data.models.filter(m => m.service === 'ollama').map(m => m.id)
+      data.models.filter(m => LLM_SERVICES.has(m.service)).map(m => m.id)
     )
   }
 }

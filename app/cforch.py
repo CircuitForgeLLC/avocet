@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import select as _select
 import subprocess as _subprocess
 import tempfile
 from pathlib import Path
@@ -311,8 +312,12 @@ def run_benchmark(
     """Spawn cf-orch benchmark.py and stream stdout as SSE progress events."""
     global _BENCH_RUNNING, _bench_proc
 
+    # Check if the process is actually still alive; reset stale flag if not.
     if _BENCH_RUNNING:
-        raise HTTPException(409, "A benchmark is already running")
+        if _bench_proc is not None and _bench_proc.poll() is None:
+            raise HTTPException(409, "A benchmark is already running")
+        _BENCH_RUNNING = False
+        _bench_proc = None
 
     cfg = _load_cforch_config()
     bench_script = cfg.get("bench_script", "")
@@ -436,8 +441,23 @@ def run_benchmark(
                 env=proc_env,
             )
             _bench_proc = proc
+            _IDLE_TIMEOUT_S = 120  # kill if no output for 2 minutes (node crash)
             try:
-                for line in proc.stdout:
+                while True:
+                    ready = _select.select([proc.stdout], [], [], _IDLE_TIMEOUT_S)
+                    if not ready[0]:
+                        # No output for IDLE_TIMEOUT_S — node likely crashed
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except _subprocess.TimeoutExpired:
+                            proc.kill()
+                        msg = f"Benchmark timed out — no output for {_IDLE_TIMEOUT_S}s (cluster node may have crashed)"
+                        yield f"data: {json.dumps({'type': 'error', 'message': msg})}\n\n"
+                        break
+                    line = proc.stdout.readline()
+                    if not line:
+                        break
                     line = _strip_ansi(line.rstrip())
                     if line:
                         yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"

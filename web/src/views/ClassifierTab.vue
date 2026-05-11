@@ -325,7 +325,7 @@ function toggleCategory(models: AvailableModel[], checked: boolean) {
 
 async function loadModelCategories() {
   modelsLoading.value = true
-  const { data } = await useApiFetch<ModelCategoriesResponse>('/api/benchmark/models')
+  const { data } = await useApiFetch<ModelCategoriesResponse>('/api/cforch/models')
   modelsLoading.value = false
   if (data?.categories) {
     modelCategories.value = data.categories
@@ -342,7 +342,7 @@ const modelCount = computed(() => modelNames.value.length)
 const labelNames = computed(() => {
   const canonical = Object.keys(LABEL_META)
   const inResults = new Set(
-    modelNames.value.flatMap(n => Object.keys(results.value!.models[n].per_label))
+    modelNames.value.flatMap(n => Object.keys(results.value?.models[n]?.per_label ?? {}))
   )
   return [...canonical.filter(l => inResults.has(l)), ...[...inResults].filter(l => !canonical.includes(l))]
 })
@@ -401,16 +401,16 @@ function formatDate(iso: string | null): string {
 // ── Data loading ─────────────────────────────────────────────────────────────
 async function loadResults() {
   loading.value = true
-  const { data } = await useApiFetch<BenchResults>('/api/benchmark/results')
+  const { data } = await useApiFetch<BenchResults>('/api/cforch/results')
   loading.value = false
-  if (data && Object.keys(data.models).length > 0) {
+  if (data?.models && Object.keys(data.models).length > 0) {
     results.value = data
   }
 }
 
 async function loadFineTunedModels() {
-  const { data } = await useApiFetch<FineTunedModel[]>('/api/finetune/status')
-  if (Array.isArray(data)) fineTunedModels.value = data
+  const { data } = await useApiFetch<{ results: FineTunedModel[] }>('/api/train/results')
+  if (Array.isArray(data?.results)) fineTunedModels.value = data.results
 }
 
 // ── Benchmark run ────────────────────────────────────────────────────────────
@@ -428,7 +428,7 @@ function startBenchmark() {
     params.set('model_names', [...selectedModels.value].join(','))
   }
   const qs  = params.toString()
-  const url = `/api/benchmark/run${qs ? `?${qs}` : ''}`
+  const url = `/api/cforch/run${qs ? `?${qs}` : ''}`
   useApiSSE(
     url,
     async (event) => {
@@ -457,7 +457,7 @@ function startBenchmark() {
 }
 
 async function cancelBenchmark() {
-  await fetch('/api/benchmark/cancel', { method: 'POST' }).catch(() => {})
+  await fetch('/api/cforch/cancel', { method: 'POST' }).catch(() => {})
 }
 
 // ── Fine-tune ─────────────────────────────────────────────────────────────────

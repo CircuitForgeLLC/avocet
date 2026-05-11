@@ -38,13 +38,17 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).parent.parent
-_MODELS_DIR: Path = _ROOT / "models"
+_MODELS_DIR: Path = Path(
+    os.environ.get("AVOCET_MODELS_DIR", str(_ROOT / "models"))
+)
 _QUEUE_DIR: Path = _ROOT / "data"
 
 # Service-specific model destinations.
 # cf-text models land on the NFS-mounted shared asset store so every cluster
-# node can reach them without a separate download. Avocet classifiers stay local
-# because they are fine-tuned in-place and are only consumed by avocet itself.
+# node can reach them without a separate download. Avocet classifiers default
+# to a local path but can be redirected via AVOCET_MODELS_DIR — set this to
+# /Library/Assets/LLM/avocet/models on NFS-connected nodes to keep all model
+# weights out of the repo directory.
 # Override via CF_TEXT_MODELS_DIR env var (useful for dev / non-NFS setups).
 _CF_TEXT_MODELS_DIR: Path = Path(
     os.environ.get("CF_TEXT_MODELS_DIR", "/Library/Assets/LLM/cf-text/models")

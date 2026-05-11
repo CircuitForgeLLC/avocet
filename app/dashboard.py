@@ -1,17 +1,18 @@
 """Avocet -- dashboard aggregate API.
 
 GET /api/dashboard returns the current flywheel state:
-  labeled_since_last_eval  -- items labeled after the most recent eval run
+  labeled_since_last_eval  -- items labeled after the most recent bench run
   last_eval_timestamp      -- ISO timestamp of newest bench_results summary
   last_eval_best_score     -- best macro_f1 from that summary
   active_jobs              -- jobs with status queued or running
   corrections_pending      -- sft_candidates with status=needs_review
   corrections_export_ready -- approved sft candidates with non-blank correction
+  recent_bench_runs        -- most-recent timestamp + score per bench type
   signals                  -- computed booleans for UI nudge indicators
 
 Thresholds in label_tool.yaml pipeline: section:
   pipeline:
-    data_eval_threshold: 50    # labeled items since last eval to trigger nudge
+    data_eval_threshold: 50    # labeled items since last bench to trigger nudge
     eval_train_threshold: 0.05 # improvement delta needed before retraining (future)
 """
 from __future__ import annotations
@@ -77,7 +78,7 @@ def _load_score_records() -> list[dict]:
             pass
     return records
 
-def _find_latest_eval(results_dir_override: str = "") -> tuple[str | None, float | None]:
+def _find_latest_classifier_bench(results_dir_override: str = "") -> tuple[str | None, float | None]:
     """Return (iso_timestamp, best_macro_f1) from the newest bench_results summary.
 
     Checks results_dir from cforch config if set, then falls back to
@@ -107,12 +108,18 @@ def _find_latest_eval(results_dir_override: str = "") -> tuple[str | None, float
             if summary.exists():
                 try:
                     data = json.loads(summary.read_text(encoding="utf-8"))
+                    if not isinstance(data, dict):
+                        continue  # cforch LLM-bench summaries are lists; skip
                     ts = data.get("timestamp") or subdir.name
                     score = data.get("best_macro_f1") or data.get("macro_f1")
                     return ts, (float(score) if isinstance(score, (int, float)) else None)
                 except Exception as exc:
                     logger.warning("Failed to parse summary.json at %s: %s", summary, exc)
     return None, None
+
+# Keep old name as alias so existing callers in tests still work.
+_find_latest_eval = _find_latest_classifier_bench
+
 
 def _count_corrections() -> tuple[int, int]:
     """Return (pending_count, export_ready_count)."""
@@ -169,22 +176,106 @@ def _count_labeled_since(since_ts: str | None) -> int:
     return sum(1 for r in records if r.get("labeled_at", "") > since_ts)
 
 
+def _get_recent_bench_runs() -> dict:
+    """Return most-recent run summary for each bench type.
+
+    Each entry: {"timestamp": str|None, "metric": str|None, "score": float|None}
+    """
+    runs: dict[str, dict] = {
+        "classifier": {"timestamp": None, "metric": "macro_f1",  "score": None},
+        "llm":        {"timestamp": None, "metric": None,         "score": None},
+        "style":      {"timestamp": None, "metric": None,         "score": None},
+        "plans":      {"timestamp": None, "metric": "avg_score", "score": None},
+    }
+
+    # ── Classifier: bench_results/<run>/summary.json ──────────────────────
+    clf_ts, clf_score = _find_latest_classifier_bench()
+    if clf_ts:
+        runs["classifier"]["timestamp"] = clf_ts
+        runs["classifier"]["score"] = clf_score
+
+    # ── LLM bench + Style: benchmark_results/ ─────────────────────────────
+    f = _config_file()
+    bench_dir: Path | None = None
+    if f.exists():
+        try:
+            raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            rd = (raw.get("cforch", {}) or {}).get("results_dir", "")
+            if rd:
+                bench_dir = Path(rd)
+        except Exception:
+            pass
+    if bench_dir is None:
+        bench_dir = _ROOT / "benchmark_results"
+
+    if bench_dir.exists():
+        llm_files = sorted(
+            [p for p in bench_dir.glob("*.json") if not p.name.startswith("style_")],
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        if llm_files:
+            try:
+                data = json.loads(llm_files[0].read_text(encoding="utf-8"))
+                runs["llm"]["timestamp"] = data.get("timestamp") or llm_files[0].stem
+            except Exception:
+                pass
+
+        style_files = sorted(bench_dir.glob("style_*.json"), reverse=True)
+        if style_files:
+            try:
+                data = json.loads(style_files[0].read_text(encoding="utf-8"))
+                if isinstance(data, list) and data:
+                    runs["style"]["timestamp"] = data[0].get("timestamp") or style_files[0].stem
+            except Exception:
+                pass
+
+    # ── Plans bench: data/plans_bench_results/plans_*.json ────────────────
+    plans_dir = _DATA_DIR / "plans_bench_results"
+    if plans_dir.exists():
+        plans_files = sorted(plans_dir.glob("plans_*.json"), reverse=True)
+        if plans_files:
+            run_id = plans_files[0].stem
+            try:
+                d: dict = json.loads(plans_files[0].read_text(encoding="utf-8"))
+                all_scores = [
+                    r["total_score"]
+                    for results in d.values()
+                    for r in results
+                    if isinstance(r, dict) and not r.get("error")
+                ]
+                avg = round(sum(all_scores) / len(all_scores), 3) if all_scores else None
+                try:
+                    date_part = run_id.removeprefix("plans_")
+                    date, time_part = date_part.split("_")
+                    ts_display = f"{date} {time_part[:2]}:{time_part[2:4]}"
+                except Exception:
+                    ts_display = run_id
+                runs["plans"]["timestamp"] = ts_display
+                runs["plans"]["score"] = avg
+            except Exception:
+                pass
+
+    return runs
+
+
 @router.get("/dashboard")
 def get_dashboard() -> dict:
-    data_eval_threshold, eval_train_threshold = _load_thresholds()
-    last_eval_ts, last_eval_score = _find_latest_eval()
-    labeled_since = _count_labeled_since(last_eval_ts)
+    data_threshold, _train_threshold = _load_thresholds()
+    last_ts, last_score = _find_latest_classifier_bench()
+    labeled_since = _count_labeled_since(last_ts)
     corrections_pending, corrections_export_ready = _count_corrections()
     active_jobs = _get_active_jobs()
+    recent_bench = _get_recent_bench_runs()
     return {
         "labeled_since_last_eval": labeled_since,
-        "last_eval_timestamp": last_eval_ts,
-        "last_eval_best_score": last_eval_score,
+        "last_eval_timestamp": last_ts,
+        "last_eval_best_score": last_score,
         "active_jobs": active_jobs,
         "corrections_pending": corrections_pending,
         "corrections_export_ready": corrections_export_ready,
+        "recent_bench_runs": recent_bench,
         "signals": {
-            "data_to_eval":   labeled_since >= data_eval_threshold,
+            "data_to_eval":   labeled_since >= data_threshold,
             "eval_to_train":  False,   # future: implement delta-F1 comparison
             "train_to_fleet": False,   # future: implement fleet sync signal
         },
