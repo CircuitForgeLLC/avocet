@@ -67,6 +67,9 @@ def finetune_cancel_compat() -> dict:
         return {"status": "nothing_running"}
     return cancel_job(row["id"])
 
+from app.data.log_corpus import router as log_corpus_router
+app.include_router(log_corpus_router, prefix="/api/corpus")
+
 from app.dashboard import router as dashboard_router
 app.include_router(dashboard_router, prefix="/api")
 
