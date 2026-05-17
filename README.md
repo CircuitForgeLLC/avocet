@@ -6,6 +6,7 @@
   **Email classifier training tool — label, benchmark, fine-tune.**
 
   [![Status: Internal Beta](https://img.shields.io/badge/status-internal%20beta-blue)]()
+  [![Version](https://img.shields.io/badge/version-0.5.0-green)](https://git.opensourcesolarpunk.com/Circuit-Forge/avocet/releases)
   [![License: BSL 1.1](https://img.shields.io/badge/license-BSL%201.1-orange)](LICENSE)
   [![Stack: Vue 3 + FastAPI](https://img.shields.io/badge/stack-Vue%203%20%2B%20FastAPI-brightgreen)]()
   [![CircuitForge](https://img.shields.io/badge/by-CircuitForge-black)](https://circuitforge.tech)
