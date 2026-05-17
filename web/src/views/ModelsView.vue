@@ -2,6 +2,24 @@
   <div class="models-view">
     <h1 class="page-title">🤗 Models</h1>
 
+    <!-- ── Fleet tab bar ─────────────────────────────── -->
+    <div class="mode-toggle" role="group" aria-label="Fleet view">
+      <button
+        class="mode-btn"
+        :class="{ active: fleetTab === 'models' }"
+        @click="fleetTab = 'models'"
+      >Models</button>
+      <button
+        class="mode-btn"
+        :class="{ active: fleetTab === 'assignments' }"
+        @click="fleetTab = 'assignments'"
+      >Assignments</button>
+    </div>
+
+    <AssignmentsTab v-if="fleetTab === 'assignments'" />
+
+    <template v-if="fleetTab === 'models'">
+
     <!-- ── 1. HF Lookup ───────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">HuggingFace Lookup</h2>
@@ -297,11 +315,17 @@
         </div>
       </template>
     </section>
+
+    </template><!-- end fleetTab === 'models' -->
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import AssignmentsTab from './AssignmentsTab.vue'
+
+type FleetTab = 'models' | 'assignments'
+const fleetTab = ref<FleetTab>('models')
 
 // ── Type definitions ──────────────────────────────────
 
@@ -736,6 +760,39 @@ onUnmounted(() => {
   font-size: 1.4rem;
   font-weight: 700;
   color: var(--color-primary, #2d5a27);
+}
+
+/* ── Fleet tab bar (mode-toggle pattern from BenchmarkView) ── */
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border, #d0d7e8);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  align-self: flex-start;
+}
+.mode-btn {
+  padding: 0.4rem 1.1rem;
+  font-size: 0.85rem;
+  font-family: var(--font-body, sans-serif);
+  font-weight: 500;
+  border: none;
+  background: var(--color-surface, #fff);
+  color: var(--color-text-secondary, #6b7a99);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mode-btn:not(:last-child) {
+  border-right: 1px solid var(--color-border, #d0d7e8);
+}
+.mode-btn.active {
+  background: var(--app-primary, #2A6080);
+  color: #fff;
+}
+.mode-btn:not(.active):hover {
+  background: var(--color-surface-raised, #e4ebf5);
+}
+@media (max-width: 600px) {
+  .mode-btn { padding: 0.4rem 0.65rem; font-size: 0.78rem; }
 }
 
 /* ── Sections ── */

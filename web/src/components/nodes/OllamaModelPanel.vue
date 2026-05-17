@@ -198,44 +198,45 @@ onUnmounted(() => {
 .ollama-panel {
   margin-top: 0.75rem;
   padding: 0.75rem;
-  border: 1px solid var(--border, #333);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
+  color: var(--color-text);
 }
-.panel-title { margin: 0 0 0.75rem; font-size: 0.9rem; }
+.panel-title { margin: 0 0 0.75rem; font-size: 0.9rem; color: var(--color-text); }
 .pull-form { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
 .pull-input {
   flex: 1;
   padding: 0.3rem 0.5rem;
-  background: var(--bg-input, #111);
-  border: 1px solid var(--border, #333);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
-  color: inherit;
+  color: var(--color-text);
   font-size: 0.875rem;
 }
 .pull-progress { margin-bottom: 0.5rem; }
 .progress-bar {
   height: 8px;
-  background: var(--bg-bar, #2a2a2a);
+  background: var(--color-border);
   border-radius: 4px;
   overflow: hidden;
   margin-bottom: 0.25rem;
 }
-.progress-fill { height: 100%; background: var(--color-primary, #4080ff); transition: width 0.2s; }
-.progress-label { font-size: 0.75rem; color: var(--text-secondary, #888); }
-.pull-error, .panel-error { color: var(--color-error, #fc8181); font-size: 0.8rem; margin-bottom: 0.5rem; }
+.progress-fill { height: 100%; background: var(--app-primary); transition: width 0.2s; }
+.progress-label { font-size: 0.75rem; color: var(--color-text-muted); }
+.pull-error, .panel-error { color: var(--color-error); font-size: 0.8rem; margin-bottom: 0.5rem; }
 .sr-announce { min-height: 1.2em; }
-.panel-loading { color: var(--text-secondary, #888); font-size: 0.875rem; }
+.panel-loading { color: var(--color-text-muted); font-size: 0.875rem; }
 .model-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
 .model-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.3rem 0.5rem;
-  background: var(--bg-secondary, #111);
+  background: var(--color-surface-alt);
   border-radius: 4px;
   font-size: 0.875rem;
 }
-.model-name { flex: 1; font-family: monospace; }
-.model-size { color: var(--text-secondary, #888); font-size: 0.8rem; }
-.model-empty { color: var(--text-secondary, #888); font-size: 0.875rem; padding: 0.25rem 0; }
+.model-name { flex: 1; font-family: var(--font-mono, monospace); }
+.model-size { color: var(--color-text-muted); font-size: 0.8rem; }
+.model-empty { color: var(--color-text-muted); font-size: 0.875rem; padding: 0.25rem 0; }
 </style>

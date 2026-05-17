@@ -99,19 +99,21 @@ onUnmounted(() => { fetchAbort?.abort() })
 .hf-panel {
   margin-top: 0.75rem;
   padding: 0.75rem;
-  border: 1px solid var(--border, #333);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
+  color: var(--color-text);
 }
-.panel-title { margin: 0 0 0.5rem; font-size: 0.9rem; }
-.hf-hint { font-size: 0.8rem; color: var(--text-secondary, #888); margin: 0 0 0.75rem; }
-.hf-link { color: var(--color-primary, #4080ff); }
+.panel-title { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--color-text); }
+.hf-hint { font-size: 0.8rem; color: var(--color-text-muted); margin: 0 0 0.75rem; }
+.hf-link { color: var(--app-primary); }
+.hf-link:hover { color: var(--app-primary-hover); }
 .svc-section { margin-bottom: 0.75rem; }
 .svc-name {
   margin: 0 0 0.25rem;
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-secondary, #888);
+  color: var(--color-text-muted);
 }
 .catalog-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
 .catalog-item {
@@ -119,14 +121,14 @@ onUnmounted(() => { fetchAbort?.abort() })
   align-items: center;
   gap: 0.5rem;
   padding: 0.25rem 0.5rem;
-  background: var(--bg-secondary, #111);
+  background: var(--color-surface-alt);
   border-radius: 4px;
   font-size: 0.8rem;
 }
-.catalog-model { font-family: monospace; flex: 1; }
-.catalog-vram { color: var(--text-secondary, #888); white-space: nowrap; }
-.catalog-desc { color: var(--text-secondary, #888); font-size: 0.75rem; flex: 2; }
-.catalog-empty, .panel-empty { color: var(--text-secondary, #888); font-size: 0.875rem; }
+.catalog-model { font-family: var(--font-mono, monospace); flex: 1; }
+.catalog-vram { color: var(--color-text-muted); white-space: nowrap; }
+.catalog-desc { color: var(--color-text-muted); font-size: 0.75rem; flex: 2; }
+.catalog-empty, .panel-empty { color: var(--color-text-muted); font-size: 0.875rem; }
 .sr-announce { min-height: 1.2em; }
-.panel-error { color: var(--color-error, #fc8181); font-size: 0.8rem; }
+.panel-error { color: var(--color-error); font-size: 0.8rem; }
 </style>

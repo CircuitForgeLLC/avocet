@@ -120,7 +120,7 @@ def list_nodes() -> list:
     try:
         r = httpx.get(f"{coordinator_url}/api/nodes", timeout=5.0)
         r.raise_for_status()
-        coord_nodes: list[dict] = r.json()
+        coord_nodes: list[dict] = r.json().get("nodes", [])
     except httpx.HTTPError as exc:
         logger.warning("Coordinator unreachable: %s", exc)
         return []
@@ -128,7 +128,7 @@ def list_nodes() -> list:
     try:
         sr = httpx.get(f"{coordinator_url}/api/services", timeout=5.0)
         sr.raise_for_status()
-        services_data: list[dict] = sr.json()
+        services_data: list[dict] = sr.json().get("services", [])
     except httpx.HTTPError:
         logger.warning("Services API unreachable for %s, skipping", coordinator_url)
         services_data = []
@@ -294,6 +294,99 @@ def update_gpu_services(node_id: str, gpu_id: int, body: UpdateServicesRequest) 
 
     return {"ok": True, "reloaded": reloaded, "warnings": []}
 
+# ── Profile save / generate ────────────────────────────────────────────────────
+
+class SaveProfileRequest(BaseModel):
+    profile: dict
+
+
+@router.put("/nodes/{node_id}/profile", status_code=200)
+def save_profile(node_id: str, body: SaveProfileRequest) -> dict:
+    """Write a full profile dict to disk as YAML, then trigger coordinator reload."""
+    p = _profile_path(node_id)
+    if p is None:
+        raise HTTPException(500, "profiles_dir not configured in label_tool.yaml")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(str(p) + ".tmp")
+    tmp.write_text(
+        yaml.dump(body.profile, default_flow_style=False, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    os.replace(tmp, p)
+
+    cfg = _load_config()
+    coordinator_url = cfg.get("coordinator_url", "") or ""
+    reloaded = False
+    if coordinator_url:
+        try:
+            import httpx
+            rr = httpx.post(f"{coordinator_url}/api/nodes/{node_id}/reload-profile", timeout=5.0)
+            reloaded = rr.status_code < 300
+        except Exception as exc:
+            logger.warning("Coordinator reload failed for %s: %s", node_id, exc)
+    return {"ok": True, "reloaded": reloaded}
+
+
+@router.post("/nodes/{node_id}/profile/generate")
+def generate_profile(node_id: str) -> dict:
+    """Return a profile skeleton seeded from coordinator GPU data.
+
+    If a profile already exists, preserves its services section and only
+    refreshes the nodes hardware section. Never writes to disk — the caller
+    must call PUT /profile to persist.
+    """
+    import httpx
+
+    cfg = _load_config()
+    coordinator_url = cfg.get("coordinator_url", "") or ""
+    if not coordinator_url:
+        raise HTTPException(503, "coordinator_url not configured")
+
+    try:
+        r = httpx.get(f"{coordinator_url}/api/nodes", timeout=5.0)
+        r.raise_for_status()
+        coord_nodes: list[dict] = r.json().get("nodes", [])
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"Coordinator unreachable: {exc}")
+
+    node = next((n for n in coord_nodes if n.get("node_id") == node_id), None)
+    if node is None:
+        raise HTTPException(404, f"Node {node_id!r} not found in coordinator")
+
+    gpus = [
+        {
+            "id": g.get("gpu_id", i),
+            "vram_mb": g.get("vram_total_mb", 0),
+            "compute_cap": g.get("compute_cap", 0.0),
+            "card": g.get("card", g.get("name", "")),
+            "role": "inference",
+            "services": [],
+        }
+        for i, g in enumerate(node.get("gpus", []))
+    ]
+    vram_total = max((g["vram_mb"] for g in gpus), default=0)
+
+    existing = _load_profile(node_id) or {}
+    return {
+        "schema_version": existing.get("schema_version", 1),
+        "name": existing.get("name", f"node-{node_id}"),
+        "vram_total_mb": vram_total,
+        "eviction_timeout_s": existing.get("eviction_timeout_s", 10.0),
+        "services": existing.get("services", {}),
+        "nodes": {
+            node_id: {
+                "local_model_root": (
+                    (existing.get("nodes", {}) or {})
+                    .get(node_id, {})
+                    .get("local_model_root", "")
+                ),
+                "gpus": gpus,
+            }
+        },
+        "model_size_hints": existing.get("model_size_hints", {}),
+    }
+
+
 # ── Ollama model management ────────────────────────────────────────────────────
 
 class PullRequest(BaseModel):
@@ -357,3 +450,86 @@ def delete_ollama_model(node_id: str, name: str) -> dict:
         raise
     except Exception as exc:
         raise HTTPException(502, f"Ollama unreachable: {exc}")
+
+
+# ── Model deploy (add catalog entry) ──────────────────────────────────────────
+
+class DeployModelRequest(BaseModel):
+    model_id: str
+    service_type: str
+    vram_mb: int
+    description: str = ""
+    hf_repo: str = ""
+    path: str = ""  # explicit path; if empty, constructed from model_base_path + hf_repo slug
+
+
+@router.post("/nodes/{node_id}/models/deploy", status_code=200)
+def deploy_model(node_id: str, body: DeployModelRequest) -> dict:
+    """Register a model in the node's service catalog.
+
+    Adds (or updates) the catalog entry for body.model_id under the given
+    service_type in the node's profile YAML, then triggers a coordinator reload.
+    Does not download the model — that is the user's responsibility.
+    Returns the resolved path so the caller can see where the model should land.
+    """
+    p = _profile_path(node_id)
+    if p is None or not p.exists():
+        raise HTTPException(404, f"No profile found for node {node_id!r}")
+
+    try:
+        profile = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise HTTPException(500, f"Malformed profile YAML: {exc}")
+
+    services_def = profile.get("services", {}) or {}
+    svc = services_def.get(body.service_type)
+    if svc is None:
+        raise HTTPException(
+            422,
+            f"Service '{body.service_type}' not defined in node '{node_id}' profile; "
+            "add it first via the profile editor",
+        )
+
+    # Resolve path: explicit > model_base_path + hf slug > model_id slug
+    model_path = body.path.strip()
+    if not model_path:
+        base = (svc.get("model_base_path", "") or "").rstrip("/")
+        if not base:
+            raise HTTPException(
+                422,
+                f"Service '{body.service_type}' has no model_base_path; supply an explicit path",
+            )
+        slug_src = body.hf_repo.strip() if body.hf_repo.strip() else body.model_id
+        hf_slug = slug_src.replace("/", "--")
+        model_path = f"{base}/{hf_slug}"
+
+    # Immutable catalog update — spread, never mutate
+    entry: dict = {"path": model_path, "vram_mb": body.vram_mb}
+    if body.description:
+        entry["description"] = body.description
+    new_catalog = {**(svc.get("catalog") or {}), body.model_id: entry}
+    new_svc = {**svc, "catalog": new_catalog}
+    new_services = {**services_def, body.service_type: new_svc}
+    new_profile = {**profile, "services": new_services}
+
+    # Atomic write
+    tmp = Path(str(p) + ".tmp")
+    tmp.write_text(
+        yaml.dump(new_profile, default_flow_style=False, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    os.replace(tmp, p)
+
+    # Trigger coordinator reload
+    cfg = _load_config()
+    coordinator_url = cfg.get("coordinator_url", "") or ""
+    reloaded = False
+    if coordinator_url:
+        try:
+            import httpx
+            rr = httpx.post(f"{coordinator_url}/api/nodes/{node_id}/reload-profile", timeout=5.0)
+            reloaded = rr.status_code < 300
+        except Exception as exc:
+            logger.warning("Coordinator reload failed for %s: %s", node_id, exc)
+
+    return {"ok": True, "reloaded": reloaded, "path": model_path}

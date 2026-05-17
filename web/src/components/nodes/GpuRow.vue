@@ -106,24 +106,24 @@ async function toggleService(svcName: string) {
 .gpu-row {
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
-  background: var(--bg-secondary, #111);
+  background: var(--color-surface-alt);
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
 .gpu-info { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; font-size: 0.875rem; }
-.gpu-label { font-weight: 500; }
-.gpu-meta { color: var(--text-secondary, #888); font-size: 0.8rem; }
+.gpu-label { font-weight: 500; color: var(--color-text); }
+.gpu-meta { color: var(--color-text-muted); font-size: 0.8rem; }
 .vram-wrap { display: flex; align-items: center; gap: 0.5rem; }
 .vram-bar {
   flex: 1;
   height: 8px;
-  background: var(--bg-bar, #2a2a2a);
+  background: var(--color-border);
   border-radius: 4px;
   overflow: hidden;
 }
-.vram-fill { height: 100%; background: var(--color-primary, #4080ff); transition: width 0.3s; }
-.vram-text { font-size: 0.75rem; color: var(--text-secondary, #888); white-space: nowrap; }
+.vram-fill { height: 100%; background: var(--app-primary); transition: width 0.3s; }
+.vram-text { font-size: 0.75rem; color: var(--color-text-muted); white-space: nowrap; }
 .services-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.save-msg { color: var(--color-warning, #ed8936); font-size: 0.8rem; }
+.save-msg { color: var(--color-warning); font-size: 0.8rem; }
 </style>

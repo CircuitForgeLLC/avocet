@@ -55,11 +55,11 @@ def _fake_nodes_response(nodes_json: list, services_json: list | None = None):
     """Build side_effect list for two httpx.get calls: nodes then services."""
     mock_nodes = MagicMock()
     mock_nodes.raise_for_status = MagicMock()
-    mock_nodes.json.return_value = nodes_json
+    mock_nodes.json.return_value = {"nodes": nodes_json}
 
     mock_services = MagicMock()
     mock_services.raise_for_status = MagicMock()
-    mock_services.json.return_value = services_json or []
+    mock_services.json.return_value = {"services": services_json or []}
 
     return [mock_nodes, mock_services]
 
@@ -468,4 +468,108 @@ def test_delete_ollama_model_404_when_not_found(client, tmp_path):
     with patch("httpx.request", return_value=mock_del):
         r = client.delete("/api/nodes-mgmt/nodes/heimdall/models/ollama/missing-model")
 
+    assert r.status_code == 404
+
+
+# ── Deploy model endpoint ──────────────────────────────────────────────────────
+
+_DEPLOY_PROFILE = {
+    "services": {
+        "cf-text": {
+            "max_mb": 20000,
+            "min_compute_cap": 7.0,
+            "model_base_path": "/devl/Assets/LLM/cf-text/models",
+            "catalog": {},
+        },
+    },
+    "nodes": {
+        "heimdall": {
+            "gpus": [],
+            "agent_url": "http://10.1.10.71:7701",
+        }
+    }
+}
+
+
+def test_deploy_model_adds_catalog_entry(client, tmp_path):
+    """Deploy endpoint should add the model to the service catalog."""
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {
+        "coordinator_url": "http://fake-coord:7700",
+        "profiles_dir": str(profiles_dir),
+    })
+    _write_profile(profiles_dir, "heimdall", _DEPLOY_PROFILE)
+
+    mock_reload = MagicMock()
+    mock_reload.status_code = 200
+
+    with patch("httpx.post", return_value=mock_reload):
+        r = client.post(
+            "/api/nodes-mgmt/nodes/heimdall/models/deploy",
+            json={
+                "model_id": "fdtn-ai--Foundation-Sec-8B-Q4",
+                "service_type": "cf-text",
+                "vram_mb": 5180,
+                "hf_repo": "fdtn-ai/Foundation-Sec-8B-Q4_K_M-GGUF",
+            },
+        )
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["reloaded"] is True
+    assert "fdtn-ai--Foundation-Sec-8B-Q4_K_M-GGUF" in data["path"]
+
+    saved = yaml.safe_load((profiles_dir / "heimdall.yaml").read_text())
+    catalog = saved["services"]["cf-text"]["catalog"]
+    assert "fdtn-ai--Foundation-Sec-8B-Q4" in catalog
+    entry = catalog["fdtn-ai--Foundation-Sec-8B-Q4"]
+    assert entry["vram_mb"] == 5180
+    assert entry["path"].endswith("fdtn-ai--Foundation-Sec-8B-Q4_K_M-GGUF")
+
+
+def test_deploy_model_explicit_path_overrides_base(client, tmp_path):
+    """An explicit path in the request body takes precedence over model_base_path."""
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {
+        "coordinator_url": "http://fake-coord:7700",
+        "profiles_dir": str(profiles_dir),
+    })
+    _write_profile(profiles_dir, "heimdall", _DEPLOY_PROFILE)
+
+    with patch("httpx.post", return_value=MagicMock(status_code=200)):
+        r = client.post(
+            "/api/nodes-mgmt/nodes/heimdall/models/deploy",
+            json={
+                "model_id": "my-model",
+                "service_type": "cf-text",
+                "vram_mb": 8000,
+                "path": "/custom/path/to/model",
+            },
+        )
+
+    assert r.status_code == 200
+    assert r.json()["path"] == "/custom/path/to/model"
+
+
+def test_deploy_model_unknown_service_returns_422(client, tmp_path):
+    """Service type not in profile → 422."""
+    profiles_dir = tmp_path / "profiles"
+    _write_config(tmp_path, {"profiles_dir": str(profiles_dir)})
+    _write_profile(profiles_dir, "heimdall", _DEPLOY_PROFILE)
+
+    r = client.post(
+        "/api/nodes-mgmt/nodes/heimdall/models/deploy",
+        json={"model_id": "x", "service_type": "vllm", "vram_mb": 8000},
+    )
+    assert r.status_code == 422
+    assert "vllm" in r.json()["detail"]
+
+
+def test_deploy_model_missing_profile_returns_404(client, tmp_path):
+    _write_config(tmp_path, {"profiles_dir": str(tmp_path / "profiles")})
+    r = client.post(
+        "/api/nodes-mgmt/nodes/nonexistent/models/deploy",
+        json={"model_id": "x", "service_type": "cf-text", "vram_mb": 100},
+    )
     assert r.status_code == 404
