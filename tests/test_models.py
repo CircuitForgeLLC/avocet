@@ -17,6 +17,7 @@ def reset_models_globals(tmp_path):
     from app import models as models_module
 
     prev_models = models_module._MODELS_DIR
+    prev_cf_text = models_module._CF_TEXT_MODELS_DIR
     prev_queue = models_module._QUEUE_DIR
     prev_progress = dict(models_module._download_progress)
 
@@ -26,12 +27,14 @@ def reset_models_globals(tmp_path):
     queue_dir.mkdir()
 
     models_module.set_models_dir(models_dir)
+    models_module.set_cf_text_models_dir(tmp_path / "cf-text-models")
     models_module.set_queue_dir(queue_dir)
     models_module._download_progress = {}
 
     yield
 
     models_module.set_models_dir(prev_models)
+    models_module.set_cf_text_models_dir(prev_cf_text)
     models_module.set_queue_dir(prev_queue)
     models_module._download_progress = prev_progress
 

@@ -20,13 +20,14 @@ import select as _select
 import subprocess as _subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import urllib.parse
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -515,7 +516,7 @@ def get_cforch_config() -> dict:
 # ── GET /results ───────────────────────────────────────────────────────────────
 
 @router.get("/results")
-def get_results() -> list:
+def get_results() -> dict:
     """Return the latest benchmark summary.json from results_dir."""
     cfg = _load_cforch_config()
     results_dir = cfg.get("results_dir", "")
@@ -547,3 +548,106 @@ def cancel_benchmark() -> dict:
     _BENCH_RUNNING = False
     _bench_proc = None
     return {"status": "cancelled"}
+
+
+# ── Coordinator proxy helpers ──────────────────────────────────────────────────
+
+def _coordinator_url() -> str:
+    """Return coordinator base URL from config, or raise 503 if not configured."""
+    url = _load_cforch_config().get("coordinator_url", "").rstrip("/")
+    if not url:
+        raise HTTPException(503, "cf-orch coordinator_url not configured")
+    return url
+
+
+def _coordinator_get(path: str) -> Any:
+    """GET from coordinator, return parsed JSON body. Raises HTTPException on error."""
+    import httpx as _httpx
+    try:
+        resp = _httpx.get(f"{_coordinator_url()}{path}", timeout=10.0)
+    except Exception as exc:
+        raise HTTPException(502, f"Coordinator unreachable: {exc}") from exc
+    if not resp.is_success:
+        raise HTTPException(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def _coordinator_post(path: str, body: dict) -> Any:
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"{_coordinator_url()}{path}", json=body)
+    except Exception as exc:
+        raise HTTPException(502, f"Coordinator unreachable: {exc}") from exc
+    if not resp.is_success:
+        raise HTTPException(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def _coordinator_delete(path: str) -> Any:
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(f"{_coordinator_url()}{path}")
+    except Exception as exc:
+        raise HTTPException(502, f"Coordinator unreachable: {exc}") from exc
+    if not resp.is_success:
+        raise HTTPException(resp.status_code, resp.text)
+    return resp.json()
+
+
+# ── GET /assignments/deployment-status ───────────────────────────────────────
+
+@router.get("/assignments/deployment-status")
+def get_deployment_status() -> Any:
+    return _coordinator_get("/api/assignments/deployment-status")
+
+
+# ── /assignments ──────────────────────────────────────────────────────────────
+
+@router.get("/assignments")
+def list_assignments() -> Any:
+    return _coordinator_get("/api/assignments")
+
+
+class AssignmentBody(BaseModel):
+    product: str
+    task: str
+    model_id: str
+    description: str = ""
+
+
+@router.post("/assignments")
+async def upsert_assignment(body: AssignmentBody) -> Any:
+    return await _coordinator_post("/api/assignments", body.model_dump())
+
+
+@router.delete("/assignments/{product}/{task}")
+async def delete_assignment(product: str, task: str) -> Any:
+    return await _coordinator_delete(f"/api/assignments/{urllib.parse.quote(product, safe='')}/{urllib.parse.quote(task, safe='')}")
+
+
+# ── /model-registry ────────────────────────────────────────────────────────────
+
+@router.get("/model-registry")
+def list_model_registry() -> Any:
+    return _coordinator_get("/api/model-registry")
+
+
+class ModelRegistryBody(BaseModel):
+    model_id: str
+    service_type: str
+    vram_mb: int
+    description: str = ""
+    hf_repo: str = ""
+    alias: str = ""
+
+
+@router.post("/model-registry")
+async def upsert_model_registry(body: ModelRegistryBody) -> Any:
+    return await _coordinator_post("/api/model-registry", body.model_dump())
+
+
+@router.delete("/model-registry/{model_id:path}")
+async def delete_model_registry(model_id: str) -> Any:
+    return await _coordinator_delete(f"/api/model-registry/{urllib.parse.quote(model_id, safe='')}")

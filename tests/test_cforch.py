@@ -176,9 +176,14 @@ def test_models_merges_installed_generators(client, config_dir, tmp_path):
 # ── GET /run ───────────────────────────────────────────────────────────────────
 
 def test_run_returns_409_when_already_running(client):
-    """If _BENCH_RUNNING is True, GET /run returns 409."""
+    """If a benchmark subprocess is actively running, GET /run returns 409."""
+    from unittest.mock import MagicMock
     from app import cforch as cforch_module
+
+    mock_proc = MagicMock()
+    mock_proc.poll.return_value = None  # process still alive
     cforch_module._BENCH_RUNNING = True
+    cforch_module._bench_proc = mock_proc
 
     r = client.get("/api/cforch/run")
     assert r.status_code == 409
@@ -212,16 +217,15 @@ def test_run_streams_progress_events(client, config_dir, tmp_path):
         "python_bin": "/usr/bin/python3",
     })
 
+    mock_stdout = MagicMock()
+    mock_stdout.readline.side_effect = ["Running task 1\n", "Running task 2\n", ""]
     mock_proc = MagicMock()
-    mock_proc.stdout = iter(["Running task 1\n", "Running task 2\n"])
+    mock_proc.stdout = mock_stdout
     mock_proc.returncode = 1  # non-zero so we don't need summary.json
+    mock_proc.wait = MagicMock()
 
-    def mock_wait():
-        pass
-
-    mock_proc.wait = mock_wait
-
-    with patch("app.cforch._subprocess.Popen", return_value=mock_proc):
+    with patch("app.cforch._subprocess.Popen", return_value=mock_proc), \
+         patch("app.cforch._select.select", return_value=([mock_stdout], [], [])):
         r = client.get("/api/cforch/run")
 
     assert r.status_code == 200
@@ -254,12 +258,15 @@ def test_run_emits_result_on_success(client, config_dir, tmp_path):
         "python_bin": "/usr/bin/python3",
     })
 
+    mock_stdout = MagicMock()
+    mock_stdout.readline.side_effect = [""]  # no output lines, immediate EOF
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = mock_stdout
     mock_proc.returncode = 0
     mock_proc.wait = MagicMock()
 
-    with patch("app.cforch._subprocess.Popen", return_value=mock_proc):
+    with patch("app.cforch._subprocess.Popen", return_value=mock_proc), \
+         patch("app.cforch._select.select", return_value=([mock_stdout], [], [])):
         r = client.get("/api/cforch/run")
 
     assert r.status_code == 200

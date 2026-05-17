@@ -124,11 +124,12 @@ _TAG_TO_INFO: dict[str, _TagInfo] = {
     "image-classification":           {"adapter": None, "role": "vision",    "service": "cf-vision"},
     "zero-shot-image-classification": {"adapter": None, "role": "vision",    "service": "cf-vision"},
     "image-feature-extraction":       {"adapter": None, "role": "embedding", "service": "cf-vision"},
-    # Generative VLMs (image+text → text) — run under vllm, not cf-vision.
-    # cf-vision is a classifier/embedder service; generative VLMs like Qwen-VL,
-    # LLaVA, and InternVL are textgen models that happen to accept image inputs.
-    "image-text-to-text":             {"adapter": None, "role": "vlm",       "service": "vllm"},
-    "visual-question-answering":      {"adapter": None, "role": "vlm",       "service": "vllm"},
+    # Generative VLMs (image+text → text) — GGUF quants run via llama.cpp (cf-text).
+    # cf-vision is a classifier/embedder service; generative VLMs like Qwen2-VL
+    # and LLaVA accept image inputs but are textgen at the backend level.
+    # Full-precision HF-format VLMs would use vllm, but our fleet uses GGUF quants.
+    "image-text-to-text":             {"adapter": None, "role": "vlm",       "service": "cf-text"},
+    "visual-question-answering":      {"adapter": None, "role": "vlm",       "service": "cf-text"},
     # Image generation — cf-image (text → image; distinct from cf-vision image understanding)
     "text-to-image":                  {"adapter": None, "role": "image-gen", "service": "cf-image"},
     # Embedding — cf-core shared embedding layer
@@ -141,6 +142,11 @@ _TAG_TO_INFO: dict[str, _TagInfo] = {
 def set_models_dir(path: Path) -> None:
     global _MODELS_DIR
     _MODELS_DIR = path
+
+
+def set_cf_text_models_dir(path: Path) -> None:
+    global _CF_TEXT_MODELS_DIR
+    _CF_TEXT_MODELS_DIR = path
 
 
 def set_queue_dir(path: Path) -> None:

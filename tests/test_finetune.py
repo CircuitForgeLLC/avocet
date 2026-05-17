@@ -321,6 +321,7 @@ def test_load_and_prepare_data_single_path_still_works(tmp_path):
 
 # ---- Integration test ----
 
+@pytest.mark.gpu
 def test_integration_finetune_on_example_data(tmp_path):
     """Fine-tune deberta-small on example data for 1 epoch.
 
