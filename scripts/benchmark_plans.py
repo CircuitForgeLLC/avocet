@@ -23,16 +23,16 @@ Usage
     python scripts/benchmark_plans.py --list-models
 
     # Run all held-out prompts against a single model, print report
-    python scripts/benchmark_plans.py --model llama3.2-3b
+    python scripts/benchmark_plans.py --model granite-4.1-8b
 
     # Compare two models side-by-side
-    python scripts/benchmark_plans.py --compare llama3.2-3b mistral-7b
+    python scripts/benchmark_plans.py --compare granite-4.1-8b deepseek-r1-7b-4bit
 
     # Run with a custom API base (cf-text default: http://localhost:8080/v1)
-    python scripts/benchmark_plans.py --model llama3.2-3b --api-base http://localhost:8080/v1
+    python scripts/benchmark_plans.py --model granite-4.1-8b --api-base http://localhost:8080/v1
 
     # Export detailed results JSON
-    python scripts/benchmark_plans.py --model llama3.2-3b --output data/bench_results.json
+    python scripts/benchmark_plans.py --model granite-4.1-8b --output data/bench_results.json
 """
 from __future__ import annotations
 
@@ -290,6 +290,11 @@ MODEL_REGISTRY: dict[str, dict[str, str]] = {
         "model": "deepseek-r1-7b-4bit",
         "description": "DeepSeek R1 7B distill, 4-bit (cf-orch catalog key)",
     },
+    "deepseek-r1-0528-qwen3-8b-gguf": {
+        "api_base": CF_TEXT_BASE,
+        "model": "deepseek-r1-0528-qwen3-8b-gguf",
+        "description": "DeepSeek R1 0528 Qwen3 8B GGUF -- current reasoning model (4 nodes)",
+    },
     "deepseek-coder-6.7b-4bit": {
         "api_base": CF_TEXT_BASE,
         "model": "deepseek-coder-6.7b-4bit",
@@ -298,17 +303,27 @@ MODEL_REGISTRY: dict[str, dict[str, str]] = {
     "granite-4.1-8b": {
         "api_base": CF_TEXT_BASE,
         "model": "granite-4.1-8b",
-        "description": "IBM Granite 4.1 8B, 4-bit (cf-orch catalog key)",
+        "description": "IBM Granite 4.1 8B, 4-bit -- safety-trained (cf-orch catalog key)",
+    },
+    "capybarahermes-2.5-mistral-7b-gguf": {
+        "api_base": CF_TEXT_BASE,
+        "model": "capybarahermes-2.5-mistral-7b-gguf",
+        "description": "CapybaraHermes 2.5 Mistral 7B GGUF -- conversational/creative (4 nodes)",
+    },
+    "darwin-9b-opus-gguf": {
+        "api_base": CF_TEXT_BASE,
+        "model": "darwin-9b-opus-gguf",
+        "description": "Darwin 9B Opus GGUF -- high-quality long-form writing (3 nodes)",
     },
     "qwen2.5-3b": {
         "api_base": CF_TEXT_BASE,
         "model": "qwen2.5-3b",
-        "description": "Qwen 2.5 3B Q4 GGUF (cf-orch catalog key, navi only)",
+        "description": "Qwen 2.5 3B Q4 GGUF (cf-orch catalog key)",
     },
     "qwen2.5-7b": {
         "api_base": CF_TEXT_BASE,
         "model": "qwen2.5-7b",
-        "description": "Qwen 2.5 7B Q4 GGUF (cf-orch catalog key, navi only)",
+        "description": "Qwen 2.5 7B Q4 GGUF (cf-orch catalog key)",
     },
 }
 

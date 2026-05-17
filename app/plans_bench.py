@@ -38,11 +38,15 @@ router = APIRouter()
 # Kept here so the UI can list them without importing the script.
 
 MODEL_REGISTRY: dict[str, str] = {
-    "llama3.2-3b":  "Llama 3.2 3B Instruct (local via cf-text)",
-    "llama3.2-1b":  "Llama 3.2 1B Instruct (local via cf-text)",
-    "mistral-7b":   "Mistral 7B Instruct (local via cf-text)",
-    "phi3-mini":    "Phi-3 Mini 3.8B (local via cf-text)",
-    "qwen2.5-3b":   "Qwen 2.5 3B Instruct (local via cf-text)",
+    "deepseek-r1-1.5b":        "DeepSeek R1 1.5B distill (cf-orch catalog key)",
+    "deepseek-r1-7b-4bit":     "DeepSeek R1 7B distill, 4-bit (cf-orch catalog key)",
+    "deepseek-r1-0528-qwen3-8b-gguf": "DeepSeek R1 0528 Qwen3 8B GGUF (4 nodes)",
+    "deepseek-coder-6.7b-4bit": "DeepSeek Coder 6.7B instruct, 4-bit (cf-orch catalog key)",
+    "granite-4.1-8b":          "IBM Granite 4.1 8B, 4-bit (cf-orch catalog key)",
+    "qwen2.5-3b":               "Qwen 2.5 3B Q4 GGUF (cf-orch catalog key)",
+    "qwen2.5-7b":               "Qwen 2.5 7B Q4 GGUF (cf-orch catalog key)",
+    "capybarahermes-2.5-mistral-7b-gguf": "CapybaraHermes 2.5 Mistral 7B GGUF (4 nodes)",
+    "darwin-9b-opus-gguf":     "Darwin 9B Opus GGUF -- long-form writing (3 nodes)",
 }
 
 RUBRIC_LABELS: dict[str, str] = {
