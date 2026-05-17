@@ -220,6 +220,7 @@ const dataItems: NavItem[] = [
   { path: '/data/fetch',       icon: '📬',  label: 'Fetch'       },
   { path: '/data/corrections', icon: '✏️',  label: 'Corrections' },
   { path: '/data/imitate',     icon: '🪞',  label: 'Imitate'     },
+  { path: '/data/recipe-scan', icon: '📷',  label: 'Recipe Scan' },
 ]
 
 const evalItems: NavItem[] = [

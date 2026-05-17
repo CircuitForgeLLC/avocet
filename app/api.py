@@ -70,6 +70,9 @@ def finetune_cancel_compat() -> dict:
 from app.data.log_corpus import router as log_corpus_router
 app.include_router(log_corpus_router, prefix="/api/corpus")
 
+from app.data.recipe_scan import router as recipe_scan_router
+app.include_router(recipe_scan_router, prefix="/api/recipe-scan")
+
 from app.dashboard import router as dashboard_router
 app.include_router(dashboard_router, prefix="/api")
 

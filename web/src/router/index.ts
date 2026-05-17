@@ -26,6 +26,7 @@ export const routes = [
   { path: '/data/fetch',       component: FetchView,       meta: { title: 'Fetch'       } },
   { path: '/data/corrections', component: CorrectionsView, meta: { title: 'Corrections' } },
   { path: '/data/imitate',     component: ImitateView,     meta: { title: 'Imitate'     } },
+  { path: '/data/recipe-scan', component: () => import('../views/RecipeScanView.vue'), meta: { title: 'Recipe Scan' } },
 
   // ── Eval domain ──────────────────────────────────────────
   { path: '/eval/benchmark', component: BenchmarkView, meta: { title: 'Benchmark' } },
