@@ -270,3 +270,185 @@ def test_export_excludes_pii_flagged(client):
 
     resp = client.get("/api/corpus/export")
     assert resp.text.strip() == ""
+
+
+# ── Pipeline ingest endpoint ───────────────────────────────────────────────────
+
+def _make_pipeline_file(directory: Path, name: str, lines: list[dict]) -> Path:
+    """Write a JSONL pipeline log file to directory."""
+    p = directory / name
+    p.write_text("\n".join(json.dumps(l) for l in lines), encoding="utf-8")
+    return p
+
+
+_PIPELINE_LINE = {
+    "ts": "2026-05-17T10:00:00Z",
+    "level": "INFO",
+    "logger": "scripts.pipeline.purple_carrot_scraper",
+    "msg": "Fetched recipe page",
+    "extra": {"url": "https://example.com/recipe/1", "status": 200},
+}
+
+
+def test_pipeline_ingest_returns_404_when_dir_not_configured(client, tmp_path):
+    """No pipeline_ingest_dir in config — endpoint returns 404."""
+    resp = client.post("/api/corpus/pipeline-ingest")
+    assert resp.status_code == 404
+
+
+def test_pipeline_ingest_empty_dir(client, tmp_path, monkeypatch):
+    """Configured dir exists but is empty — returns zeros, no error."""
+    ingest_dir = tmp_path / "pipeline_logs"
+    ingest_dir.mkdir()
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "label_tool.yaml").write_text(
+        f"corpus:\n  pipeline_ingest_dir: \"{ingest_dir}\"\n  sources: []\n"
+    )
+    monkeypatch.setattr(lc, "_CONFIG_DIR", config_dir)
+
+    resp = client.post("/api/corpus/pipeline-ingest")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ingested_files"] == 0
+    assert data["skipped_files"] == 0
+    assert data["entries_stored"] == 0
+
+
+def test_pipeline_ingest_ingests_valid_file(client, tmp_path, monkeypatch):
+    """Valid JSONL file is ingested; entries appear in corpus."""
+    ingest_dir = tmp_path / "pipeline_logs"
+    ingest_dir.mkdir()
+    _make_pipeline_file(ingest_dir, "scraper_20260517.jsonl", [
+        _PIPELINE_LINE,
+        {**_PIPELINE_LINE, "msg": "Saved 3 recipes", "level": "INFO"},
+    ])
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "label_tool.yaml").write_text(
+        f"corpus:\n  pipeline_ingest_dir: \"{ingest_dir}\"\n  sources: []\n"
+    )
+    monkeypatch.setattr(lc, "_CONFIG_DIR", config_dir)
+
+    resp = client.post("/api/corpus/pipeline-ingest")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ingested_files"] == 1
+    assert data["entries_stored"] == 2
+
+    entries = client.get("/api/corpus/entries", params={"limit": 10}).json()["entries"]
+    assert len(entries) == 2
+    assert all(e["source_host"] == "pipeline_scrape" for e in entries)
+
+
+def test_pipeline_ingest_source_id_from_logger(client, tmp_path, monkeypatch):
+    """source_id is populated from the 'logger' field of each log line."""
+    ingest_dir = tmp_path / "pipeline_logs"
+    ingest_dir.mkdir()
+    _make_pipeline_file(ingest_dir, "run_20260517.jsonl", [_PIPELINE_LINE])
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "label_tool.yaml").write_text(
+        f"corpus:\n  pipeline_ingest_dir: \"{ingest_dir}\"\n  sources: []\n"
+    )
+    monkeypatch.setattr(lc, "_CONFIG_DIR", config_dir)
+
+    client.post("/api/corpus/pipeline-ingest")
+    entries = client.get("/api/corpus/entries", params={"limit": 10}).json()["entries"]
+    assert entries[0]["source_id"] == "scripts.pipeline.purple_carrot_scraper"
+
+
+def test_pipeline_ingest_idempotent(client, tmp_path, monkeypatch):
+    """Calling the endpoint twice does not re-ingest already-processed files."""
+    ingest_dir = tmp_path / "pipeline_logs"
+    ingest_dir.mkdir()
+    _make_pipeline_file(ingest_dir, "scraper_20260517.jsonl", [_PIPELINE_LINE])
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "label_tool.yaml").write_text(
+        f"corpus:\n  pipeline_ingest_dir: \"{ingest_dir}\"\n  sources: []\n"
+    )
+    monkeypatch.setattr(lc, "_CONFIG_DIR", config_dir)
+
+    client.post("/api/corpus/pipeline-ingest")
+    resp2 = client.post("/api/corpus/pipeline-ingest")
+
+    data = resp2.json()
+    assert data["ingested_files"] == 0
+    assert data["skipped_files"] == 1
+    assert data["entries_stored"] == 0
+
+    entries = client.get("/api/corpus/entries", params={"limit": 10}).json()["entries"]
+    assert len(entries) == 1  # still just the one from the first ingest
+
+
+def test_pipeline_ingest_skips_non_jsonl(client, tmp_path, monkeypatch):
+    """Non-.jsonl files in the dir are silently ignored."""
+    ingest_dir = tmp_path / "pipeline_logs"
+    ingest_dir.mkdir()
+    (ingest_dir / "notes.txt").write_text("this is not a log file")
+    (ingest_dir / "run.csv").write_text("a,b,c\n1,2,3")
+    _make_pipeline_file(ingest_dir, "valid_20260517.jsonl", [_PIPELINE_LINE])
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "label_tool.yaml").write_text(
+        f"corpus:\n  pipeline_ingest_dir: \"{ingest_dir}\"\n  sources: []\n"
+    )
+    monkeypatch.setattr(lc, "_CONFIG_DIR", config_dir)
+
+    resp = client.post("/api/corpus/pipeline-ingest")
+    assert resp.json()["ingested_files"] == 1
+
+
+def test_pipeline_ingest_skips_malformed_lines(client, tmp_path, monkeypatch):
+    """Lines that are not valid JSON are skipped; valid lines in the same file still land."""
+    ingest_dir = tmp_path / "pipeline_logs"
+    ingest_dir.mkdir()
+    p = ingest_dir / "mixed_20260517.jsonl"
+    p.write_text(
+        json.dumps(_PIPELINE_LINE) + "\n"
+        "this is not json\n"
+        + json.dumps({**_PIPELINE_LINE, "msg": "another valid line"}),
+        encoding="utf-8",
+    )
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "label_tool.yaml").write_text(
+        f"corpus:\n  pipeline_ingest_dir: \"{ingest_dir}\"\n  sources: []\n"
+    )
+    monkeypatch.setattr(lc, "_CONFIG_DIR", config_dir)
+
+    resp = client.post("/api/corpus/pipeline-ingest")
+    assert resp.status_code == 200
+    assert resp.json()["entries_stored"] == 2  # 2 valid lines, 1 skipped
+
+
+def test_pipeline_ingest_new_file_after_first_run(client, tmp_path, monkeypatch):
+    """A new file added after the first ingest is picked up on the next call."""
+    ingest_dir = tmp_path / "pipeline_logs"
+    ingest_dir.mkdir()
+    _make_pipeline_file(ingest_dir, "run_a.jsonl", [_PIPELINE_LINE])
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "label_tool.yaml").write_text(
+        f"corpus:\n  pipeline_ingest_dir: \"{ingest_dir}\"\n  sources: []\n"
+    )
+    monkeypatch.setattr(lc, "_CONFIG_DIR", config_dir)
+
+    client.post("/api/corpus/pipeline-ingest")  # ingest run_a.jsonl
+
+    _make_pipeline_file(ingest_dir, "run_b.jsonl", [
+        {**_PIPELINE_LINE, "msg": "Second run line"},
+    ])
+
+    resp2 = client.post("/api/corpus/pipeline-ingest")
+    data = resp2.json()
+    assert data["ingested_files"] == 1
+    assert data["skipped_files"] == 1
+    assert data["entries_stored"] == 1

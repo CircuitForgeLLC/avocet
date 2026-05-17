@@ -122,6 +122,22 @@ imitate:
       text_fields: [title]
       prompt_template: "Summarize the key rules described in this passage:\n\n{text}"
 
+# ── Log corpus (Turnstone training data) ──────────────────────────────────────
+corpus:
+  # Directory containing pipeline JSONL log files to ingest (pull-side).
+  # Files named <script>_<ts>.jsonl; one structured record per line.
+  # POST /api/corpus/pipeline-ingest walks this dir and imports new files.
+  # NFS-mounted on both Heimdall and Sif at /Library/Assets/
+  pipeline_ingest_dir: /Library/Assets/logs/pipeline/
+
+  # Turnstone push sources (consent-gated, token-authenticated).
+  # sources:
+  #   - token: "your-bearer-token"
+  #     source_host: "node.local"
+  #     owner: YourName
+  #     consent_date: "2026-05-17"
+  #     consent_method: signal_chat
+
 # ── Embedding model comparison harness ────────────────────────────────────────
 embed_bench:
   # ollama_url: http://localhost:11434   # optional; falls back to cforch.ollama_url
