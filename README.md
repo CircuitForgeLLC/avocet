@@ -172,4 +172,6 @@ Avocet is developed and maintained on Forgejo at [git.opensourcesolarpunk.com/Ci
 
 Free for personal non-commercial self-hosting. Commercial use or SaaS re-hosting requires a paid license. Converts to MIT after 4 years.
 
+Humans own design, architecture, code review, testing, and verification. LLMs are part of our development workflow. [Our positions on LLM use →](https://circuitforge.tech/positions)
+
 © 2026 Circuit Forge LLC — Privacy · Safety · Accessibility
