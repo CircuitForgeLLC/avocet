@@ -318,9 +318,28 @@ def _register_in_node_catalogs(
         )
         return []
 
+    # Resolve the primary GGUF file — skip mmproj (vision projection matrices).
+    # If no .gguf file exists the model is safetensors-only: llama.cpp cannot
+    # load it, so catalog registration would produce a broken entry.
+    gguf_files = sorted(
+        (f for f in local_path.glob("*.gguf") if "mmproj" not in f.name.lower()),
+        key=lambda f: f.stat().st_size,
+        reverse=True,
+    )
+    if not gguf_files:
+        logger.warning(
+            "%s: no .gguf files found in %s — safetensors-only model, "
+            "skipping catalog registration",
+            repo_id, local_path,
+        )
+        return []
+
+    # Pick the largest GGUF (highest quality when multiple quant levels downloaded)
+    gguf_file = gguf_files[0]
+    gguf_filename = gguf_file.name
+
     model_key = _catalog_key(repo_id)
     local_path_str = str(local_path)
-    vram_4bit = round(vram_mb_fp16 / 4 * 1.1)
     updated: list[str] = []
 
     for yaml_file in sorted(profiles_dir.glob("*.yaml")):
@@ -335,67 +354,52 @@ def _register_in_node_catalogs(
             max_mb: int = cf_text.get("max_mb", 0)
             catalog: dict = cf_text.get("catalog") or {}
 
-            # If the node has a different local model dir, remap the NFS path.
+            # If the node stores models at a different root (model_base_path),
+            # remap to that root while keeping the dir name and GGUF filename.
             model_base = cf_text.get("model_base_path", "").rstrip("/")
             if model_base:
-                nfs_base = str(_CF_TEXT_MODELS_DIR).rstrip("/")
-                model_name = local_path.name
-                effective_path_str = f"{model_base}/{model_name}"
+                effective_path_str = f"{model_base}/{local_path.name}/{gguf_filename}"
             else:
-                effective_path_str = local_path_str
+                effective_path_str = str(gguf_file)
 
             # Skip if key already exists
             if model_key in catalog:
                 logger.debug("Key %r already in %s — skipping", model_key, yaml_file.name)
                 continue
 
-            # Skip if any existing entry already points at this path (or a file within it)
+            # Skip if this GGUF file or its parent directory is already registered
             registered_paths = {
                 str(entry.get("path", ""))
                 for entry in catalog.values()
                 if isinstance(entry, dict)
             }
-            if effective_path_str in registered_paths or any(
-                p.startswith(effective_path_str + "/") for p in registered_paths
+            if (
+                effective_path_str in registered_paths
+                or local_path_str in registered_paths
+                or any(p.startswith(local_path_str + "/") for p in registered_paths)
             ):
-                logger.debug("Path %s already registered in %s — skipping", effective_path_str, yaml_file.name)
+                logger.debug(
+                    "Path %s already registered in %s — skipping",
+                    effective_path_str, yaml_file.name,
+                )
                 continue
 
-            # Determine whether model fits at FP16 or needs 4-bit
-            if vram_mb_fp16 <= max_mb:
-                vram_for_node = vram_mb_fp16
-                needs_4bit = False
-            elif vram_4bit <= max_mb:
-                vram_for_node = vram_4bit
-                needs_4bit = True
-            else:
+            # GGUF models are already quantized; vram_mb_fp16 is the file size.
+            # No 4-bit fallback needed — the file is what it is.
+            if vram_mb_fp16 > max_mb:
                 logger.debug(
-                    "%s too large for %s (fp16=%d MB, 4bit=%d MB, max=%d MB)",
-                    repo_id, yaml_file.name, vram_mb_fp16, vram_4bit, max_mb,
+                    "%s too large for %s (vram=%d MB, max=%d MB)",
+                    repo_id, yaml_file.name, vram_mb_fp16, max_mb,
                 )
                 continue
 
             desc = f"{repo_id} ({role}, downloaded via avocet)"
-            if needs_4bit:
-                desc += " — CF_TEXT_4BIT=1 required"
-
-            vram_comment = (
-                f"  # 4-bit estimate; FP16 footprint is {vram_mb_fp16} MB"
-                if needs_4bit
-                else f"  # FP16 file-size estimate"
-            )
-            env_block = (
-                f"        env:\n"
-                f"          CF_TEXT_4BIT: \"1\"\n"
-                if needs_4bit else ""
-            )
             entry_block = (
                 f"      # auto-registered by avocet on download\n"
                 f"      {model_key}:\n"
                 f"        path: {effective_path_str}\n"
-                f"        vram_mb: {vram_for_node}{vram_comment}\n"
+                f"        vram_mb: {vram_mb_fp16}  # {gguf_filename}\n"
                 f"        description: \"{desc}\"\n"
-                f"{env_block}"
             )
 
             new_content = _insert_catalog_entry(content, entry_block)
@@ -406,8 +410,8 @@ def _register_in_node_catalogs(
             yaml_file.write_text(new_content, encoding="utf-8")
             updated.append(yaml_file.stem)
             logger.info(
-                "Registered %s in %s (vram_mb=%d, 4bit=%s)",
-                model_key, yaml_file.name, vram_for_node, needs_4bit,
+                "Registered %s in %s (path=%s, vram_mb=%d)",
+                model_key, yaml_file.name, effective_path_str, vram_mb_fp16,
             )
 
         except Exception as exc:

@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -21,6 +22,13 @@ from pathlib import Path
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
+
+try:
+    from starlette.requests import Request as StarletteRequest
+    from starlette.responses import Response as StarletteResponse
+except ImportError:
+    StarletteRequest = Any  # type: ignore[assignment,misc]
+    StarletteResponse = Any  # type: ignore[assignment,misc]
 
 import httpx
 import yaml
@@ -303,17 +311,23 @@ def _run_cftext(
     polling the service health endpoint — this fails fast on model load errors instead
     of waiting out the full timeout.
     """
-    # Allocate
-    alloc_resp = httpx.post(
-        f"{cforch_base}/api/services/cf-text/allocate",
-        json={
-            "model_candidates": [model_id],
-            "caller": "avocet",
-            "pipeline": "imitate",
-            **({"user_id": user_id} if user_id else {}),
-        },
-        timeout=30.0,
-    )
+    # Allocate — retry on 503 (previous allocation may still be releasing)
+    _alloc_delays = [3.0, 6.0, 12.0]
+    for _attempt, _delay in enumerate([0.0] + _alloc_delays):
+        if _delay:
+            time.sleep(_delay)
+        alloc_resp = httpx.post(
+            f"{cforch_base}/api/services/cf-text/allocate",
+            json={
+                "model_candidates": [model_id],
+                "caller": "avocet",
+                "pipeline": "imitate",
+                **({"user_id": user_id} if user_id else {}),
+            },
+            timeout=30.0,
+        )
+        if alloc_resp.status_code != 503 or _attempt == len(_alloc_delays):
+            break
     alloc_resp.raise_for_status()
     data = alloc_resp.json()
     service_url: str = data["url"]
@@ -498,7 +512,10 @@ def get_catalog() -> dict:
 
 # ── GET /run (SSE) ─────────────────────────────────────────────────────────────
 
-def _get_imitate_session(request: Any, response: Any) -> "CloudUser | None":
+def _get_imitate_session(
+    request: StarletteRequest,
+    response: StarletteResponse,
+) -> "CloudUser | None":
     """Optional session dependency — returns None when cloud_session is unavailable."""
     try:
         from app.cloud_session import get_session
@@ -625,46 +642,53 @@ def run_imitate(
             yield _sse({"type": "model_done", **result})
 
         if cftext_real:
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-            # Announce all models upfront so the UI can show loading states immediately
-            for model_id in cftext_real:
-                yield _sse({"type": "model_start", "model": model_id, "service": "cf-text"})
-
             _user_id: str | None = getattr(session, "user_id", None)
             # Only forward real cloud user IDs — skip local/anon sessions
             if _user_id in (None, "local", "local-dev") or (_user_id or "").startswith("anon-"):
                 _user_id = None
 
-            with ThreadPoolExecutor(max_workers=len(cftext_real)) as pool:
-                future_to_model = {
-                    pool.submit(
-                        _run_cftext, cforch_base, mid, prompt, system_ctx, temperature,
-                        180.0, _user_id,
-                    ): mid
-                    for mid in cftext_real
-                }
-                for future in as_completed(future_to_model):
-                    model_id = future_to_model[future]
+            for model_id in cftext_real:
+                yield _sse({"type": "model_start", "model": model_id, "service": "cf-text"})
+
+                # Run blocking cf-text call in a thread; yield heartbeats every 15 s
+                # so proxies/browsers don't kill the idle SSE connection during cold starts.
+                _slot: dict = {}
+                _done = threading.Event()
+
+                def _worker(mid: str = model_id) -> None:
                     try:
-                        response, elapsed_ms, cold_started = future.result()
-                        if cold_started:
-                            yield _sse({"type": "model_coldstart", "model": model_id})
-                        result = {
-                            "model":      model_id,
-                            "response":   response,
-                            "elapsed_ms": elapsed_ms,
-                            "error":      None,
-                        }
+                        r, e, c = _run_cftext(
+                            cforch_base, mid, prompt, system_ctx, temperature,
+                            180.0, _user_id,
+                        )
+                        _slot.update({"response": r, "elapsed_ms": e, "cold_started": c})
                     except Exception as exc:
-                        result = {
-                            "model":      model_id,
-                            "response":   "",
-                            "elapsed_ms": 0,
-                            "error":      str(exc),
-                        }
-                    results.append(result)
-                    yield _sse({"type": "model_done", **result})
+                        _slot["error"] = str(exc)
+                    finally:
+                        _done.set()
+
+                threading.Thread(target=_worker, daemon=True).start()
+                while not _done.wait(timeout=15.0):
+                    yield _sse({"type": "heartbeat"})
+
+                if "error" in _slot:
+                    result = {
+                        "model":      model_id,
+                        "response":   "",
+                        "elapsed_ms": 0,
+                        "error":      _slot["error"],
+                    }
+                else:
+                    if _slot.get("cold_started"):
+                        yield _sse({"type": "model_coldstart", "model": model_id})
+                    result = {
+                        "model":      model_id,
+                        "response":   _slot["response"],
+                        "elapsed_ms": _slot["elapsed_ms"],
+                        "error":      None,
+                    }
+                results.append(result)
+                yield _sse({"type": "model_done", **result})
 
         yield _sse({"type": "complete", "results": results})
 

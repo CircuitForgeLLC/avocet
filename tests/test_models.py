@@ -566,15 +566,20 @@ def _make_node_yaml(tmp_path: Path, max_mb: int = 8192) -> Path:
     return p
 
 
-def test_catalog_registration_fp16_no_env_block(tmp_path):
-    """When model fits at FP16, no env block should be written."""
+def test_catalog_registration_writes_gguf_path(tmp_path):
+    """Registration writes the full GGUF file path, not the directory."""
     from app import models as models_module
+
+    model_dir = tmp_path / "org--SmallModel"
+    model_dir.mkdir()
+    gguf = model_dir / "smallmodel-Q4_K_M.gguf"
+    gguf.write_bytes(b"fake")
 
     node_yaml = _make_node_yaml(tmp_path, max_mb=8192)
     with patch.object(models_module, "_CF_ORCH_PROFILES_DIR", tmp_path):
         updated = models_module._register_in_node_catalogs(
             repo_id="org/SmallModel",
-            local_path=tmp_path / "org--SmallModel",
+            local_path=model_dir,
             vram_mb_fp16=4000,
             role="generator",
         )
@@ -583,45 +588,86 @@ def test_catalog_registration_fp16_no_env_block(tmp_path):
     content = node_yaml.read_text()
     # _catalog_key strips org prefix and lowercases: "org/SmallModel" → "smallmodel"
     assert "smallmodel:" in content
+    assert str(gguf) in content
     assert "CF_TEXT_4BIT" not in content
     assert "env:" not in content
 
 
-def test_catalog_registration_needs_4bit_writes_env_block(tmp_path):
-    """When model only fits at 4-bit, env: CF_TEXT_4BIT: '1' must be written."""
+def test_catalog_registration_safetensors_skipped(tmp_path):
+    """Safetensors-only models (no .gguf) are skipped — llama.cpp cannot load them."""
     from app import models as models_module
 
+    model_dir = tmp_path / "org--SftModel"
+    model_dir.mkdir()
+    (model_dir / "model.safetensors").write_bytes(b"fake")
+
     node_yaml = _make_node_yaml(tmp_path, max_mb=8192)
+    original_content = node_yaml.read_text()
+
     with patch.object(models_module, "_CF_ORCH_PROFILES_DIR", tmp_path):
         updated = models_module._register_in_node_catalogs(
-            repo_id="org/BigModel",
-            local_path=tmp_path / "org--BigModel",
-            vram_mb_fp16=20000,  # won't fit at FP16 on 8 GB
+            repo_id="org/SftModel",
+            local_path=model_dir,
+            vram_mb_fp16=5000,
             role="generator",
         )
 
-    assert "testnode" in updated
-    content = node_yaml.read_text()
-    # _catalog_key: "org/BigModel" → "bigmodel"
-    assert "bigmodel:" in content
-    assert "env:" in content
-    assert 'CF_TEXT_4BIT: "1"' in content
-    assert "CF_TEXT_4BIT=1 required" in content  # description note
+    assert updated == []
+    assert node_yaml.read_text() == original_content
 
 
 def test_catalog_registration_too_large_skipped(tmp_path):
-    """Model too large even at 4-bit should not be registered."""
+    """GGUF whose VRAM exceeds node max_mb is not registered."""
     from app import models as models_module
+
+    model_dir = tmp_path / "org--HugeModel"
+    model_dir.mkdir()
+    (model_dir / "huge-Q8_0.gguf").write_bytes(b"fake")
 
     node_yaml = _make_node_yaml(tmp_path, max_mb=8192)
     with patch.object(models_module, "_CF_ORCH_PROFILES_DIR", tmp_path):
         updated = models_module._register_in_node_catalogs(
             repo_id="org/HugeModel",
-            local_path=tmp_path / "org--HugeModel",
-            vram_mb_fp16=80000,  # 4-bit ~22 GB, still won't fit on 8 GB
+            local_path=model_dir,
+            vram_mb_fp16=80000,
             role="generator",
         )
 
     assert updated == []
     content = node_yaml.read_text()
     assert "hugemodel" not in content
+
+
+def test_catalog_registration_model_base_path_remapped(tmp_path):
+    """When node has model_base_path, the entry uses the remapped path with GGUF filename."""
+    from app import models as models_module
+
+    model_dir = tmp_path / "org--ReMapped"
+    model_dir.mkdir()
+    (model_dir / "remapped-Q6_K.gguf").write_bytes(b"fake")
+
+    node_yaml = tmp_path / "remapnode.yaml"
+    node_yaml.write_text(
+        "services:\n"
+        "  cf-text:\n"
+        "    max_mb: 8192\n"
+        "    model_base_path: /custom/models\n"
+        "    catalog:\n"
+        "      placeholder:\n"
+        "        path: /custom/models/placeholder/model.gguf\n"
+        "        vram_mb: 100\n"
+        "        description: placeholder\n",
+        encoding="utf-8",
+    )
+
+    with patch.object(models_module, "_CF_ORCH_PROFILES_DIR", tmp_path):
+        updated = models_module._register_in_node_catalogs(
+            repo_id="org/ReMapped",
+            local_path=model_dir,
+            vram_mb_fp16=4000,
+            role="generator",
+        )
+
+    assert "remapnode" in updated
+    content = node_yaml.read_text()
+    assert "/custom/models/org--ReMapped/remapped-Q6_K.gguf" in content
