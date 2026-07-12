@@ -1,0 +1,6 @@
+# Known false positives — browser localStorage key name constants, not secrets
+# STORAGE_KEY / LS_KEY hold localStorage slot identifiers, not credential values
+e823c84196818916afebaac97b56f1ff7ef681a6:web/src/composables/useMotion.ts:cf-generic-env-token:3
+7edcb089a9325814b6c4ce3b41a2c969896c067d:web/src/composables/useMotion.ts:cf-generic-env-token:3
+2a48ab0f0303abc39c4ecb6cc8c4e2f1a8b836df:web/src/components/AppSidebar.vue:cf-generic-env-token:62
+7bd37ef982490dbc19245ff3216c60d2a6cf86a2:web/src/components/AppSidebar.vue:cf-generic-env-token:62
