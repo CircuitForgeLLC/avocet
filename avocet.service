@@ -1,0 +1,33 @@
+[Unit]
+Description=Avocet — Email Classifier Training Tool (Vue UI + FastAPI)
+Documentation=https://git.circuitforge.tech/Circuit-Forge/avocet
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alan
+WorkingDirectory=/Library/Development/CircuitForge/avocet
+
+# Rebuild the Vue SPA on every start — cheap, and keeps the served bundle in
+# sync with source without a separate manual step. Skips silently if node_modules
+# isn't installed yet (first-time setup still needs `cd web && npm install` once).
+ExecStartPre=-/bin/bash -c 'cd web && npm run build'
+
+# Runs uvicorn directly in the foreground so systemd tracks the real process —
+# do NOT also run `./manage.sh start` while this unit is active, they'd both
+# try to bind :8503. Use `systemctl start/stop/restart avocet` instead once
+# this is installed; manage.sh's benchmark/score/compare/etc. subcommands are
+# unaffected and still fine to use standalone.
+EnvironmentFile=-/Library/Development/CircuitForge/avocet/.env
+ExecStart=/devl/miniconda3/envs/cf/bin/python -m uvicorn app.api:app --host 0.0.0.0 --port 8503
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=avocet
+
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
