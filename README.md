@@ -6,7 +6,7 @@
   **Email classifier training tool — label, benchmark, fine-tune.**
 
   [![Status: Internal Beta](https://img.shields.io/badge/status-internal%20beta-blue)]()
-  [![Version](https://img.shields.io/badge/version-0.5.0-green)](https://git.opensourcesolarpunk.com/Circuit-Forge/avocet/releases)
+  [![Version](https://img.shields.io/badge/version-0.5.0-green)](https://git.circuitforge.tech/Circuit-Forge/avocet/releases)
   [![License: BSL 1.1](https://img.shields.io/badge/license-BSL%201.1-orange)](LICENSE)
   [![Stack: Vue 3 + FastAPI](https://img.shields.io/badge/stack-Vue%203%20%2B%20FastAPI-brightgreen)]()
   [![CircuitForge](https://img.shields.io/badge/by-CircuitForge-black)](https://circuitforge.tech)
@@ -23,7 +23,7 @@ Avocet is the internal data pipeline Circuit Forge uses to build, evaluate, and 
 ## Quick Start
 
 ```bash
-git clone https://git.opensourcesolarpunk.com/Circuit-Forge/avocet.git
+git clone https://git.circuitforge.tech/Circuit-Forge/avocet.git
 cd avocet
 
 # Copy config template and fill in your IMAP credentials
@@ -156,13 +156,13 @@ The Avocet logo (`avocet_v1_poly.svg`) lives in the shared graphics repo. Copy i
 
 ## About
 
-Avocet is internal CircuitForge infrastructure, open source as a reference implementation. It is not a user-facing product. The primary consumer is [Peregrine](https://git.opensourcesolarpunk.com/Circuit-Forge/peregrine), CircuitForge's job-search pipeline tool.
+Avocet is internal CircuitForge infrastructure, open source as a reference implementation. It is not a user-facing product. The primary consumer is [Peregrine](https://git.circuitforge.tech/Circuit-Forge/peregrine), CircuitForge's job-search pipeline tool.
 
 Docs: [docs.circuitforge.tech/avocet](https://docs.circuitforge.tech/avocet)
 
 ## Forgejo-primary
 
-Avocet is developed and maintained on Forgejo at [git.opensourcesolarpunk.com/Circuit-Forge/avocet](https://git.opensourcesolarpunk.com/Circuit-Forge/avocet). GitHub and Codeberg are read-only mirrors.
+Avocet is developed and maintained on Forgejo at [git.circuitforge.tech/Circuit-Forge/avocet](https://git.circuitforge.tech/Circuit-Forge/avocet). GitHub and Codeberg are read-only mirrors.
 
 ---
 
