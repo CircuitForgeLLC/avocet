@@ -82,6 +82,8 @@ usage() {
     echo -e "    ${GREEN}start${NC}                    Build Vue SPA + start FastAPI on port 8503"
     echo -e "    ${GREEN}stop${NC}                     Stop FastAPI server"
     echo -e "    ${GREEN}restart${NC}                  Stop + rebuild + restart FastAPI server"
+    echo -e "    ${GREEN}status${NC}                   Show running state, PID, uptime, port"
+    echo -e "    ${GREEN}logs [n]${NC}                  Tail the API log (follows; default last 50 lines)"
     echo -e "    ${GREEN}open${NC}                     Open Vue UI in browser (http://localhost:8503)"
     echo ""
     echo "  Benchmark:"
@@ -178,6 +180,31 @@ case "$CMD" in
     restart)
         bash "$0" stop
         exec bash "$0" start
+        ;;
+
+    status)
+        API_PID_FILE=".avocet-api.pid"
+        API_PORT=8503
+        if [[ -f "$API_PID_FILE" ]] && kill -0 "$(<"$API_PID_FILE")" 2>/dev/null; then
+            PID="$(<"$API_PID_FILE")"
+            UPTIME="$(ps -o etime= -p "$PID" 2>/dev/null | tr -d ' ')"
+            if (echo "" >/dev/tcp/127.0.0.1/"$API_PORT") 2>/dev/null; then
+                success "Running — PID ${PID}, up ${UPTIME:-unknown}, port ${API_PORT} responding → http://localhost:${API_PORT}"
+            else
+                warn "Process alive (PID ${PID}, up ${UPTIME:-unknown}) but port ${API_PORT} is not responding."
+            fi
+        else
+            warn "Not running (no live PID in ${API_PID_FILE})."
+        fi
+        ;;
+
+    logs)
+        API_LOG="${LOG_DIR}/api.log"
+        if [[ ! -f "$API_LOG" ]]; then
+            warn "No log file at ${API_LOG} yet."
+            exit 0
+        fi
+        tail -n "${1:-50}" -f "$API_LOG"
         ;;
 
     dev)
