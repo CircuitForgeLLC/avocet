@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 from fastapi.testclient import TestClient
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+import pytest
 import app.vaportrade_bench as vtb
 
 
@@ -50,3 +51,16 @@ def test_results_by_run_id_rejects_malformed_run_id(tmp_path, monkeypatch):
     client = _app_with_router(tmp_path, monkeypatch)
     r = client.get("/api/vaportrade-bench/results/not-a-report-id")
     assert r.status_code == 400
+
+
+def test_results_by_run_id_rejects_path_traversal(tmp_path, monkeypatch):
+    # FastAPI's default {run_id} path converter never matches a literal or
+    # percent-encoded "/", so a traversal string routed through the real
+    # HTTP layer 404s before reaching the handler at all -- that's already
+    # safe, but doesn't exercise the handler's own defense-in-depth guard.
+    # Call the handler directly (as a unit) to prove the guard itself
+    # rejects a traversal-shaped run_id, independent of routing behavior.
+    monkeypatch.setattr(vtb, "_RESULTS_DIR", tmp_path)
+    with pytest.raises(HTTPException) as exc_info:
+        vtb.get_results_by_run_id("report-../../../etc/passwd")
+    assert exc_info.value.status_code == 400

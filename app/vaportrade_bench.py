@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess as _subprocess
 from pathlib import Path
 from typing import Any, Literal
@@ -96,9 +97,15 @@ def get_latest_results() -> dict:
 
 @router.get("/results/{run_id}")
 def get_results_by_run_id(run_id: str) -> dict:
-    if not run_id.startswith("report-"):
+    if not re.fullmatch(r"report-\d{8}-\d{6}", run_id):
         raise HTTPException(400, "Invalid run_id — expected report-YYYYMMDD-HHMMSS")
-    f = _results_dir() / f"{run_id}.md"
+    d = _results_dir()
+    f = (d / f"{run_id}.md").resolve()
+    # Defense-in-depth on top of the regex above: verify the resolved path
+    # is still contained within the results dir before touching the
+    # filesystem (catches any traversal shape the regex might miss).
+    if not str(f).startswith(str(d.resolve()) + "/"):
+        raise HTTPException(400, "Invalid run_id")
     if not f.exists():
         raise HTTPException(404, f"Results not found: {run_id}")
     return {"filename": f.name, "content": f.read_text(encoding="utf-8")}
