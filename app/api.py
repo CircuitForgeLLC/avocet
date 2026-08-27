@@ -37,6 +37,9 @@ app.include_router(train_router, prefix="/api/train")
 from app.plans_bench import router as plans_bench_router
 app.include_router(plans_bench_router, prefix="/api/plans-bench")
 
+from app.vaportrade_bench import router as vaportrade_bench_router
+app.include_router(vaportrade_bench_router, prefix="/api/vaportrade-bench")
+
 # In-memory last-action store (single user, local tool — in-memory is fine)
 _last_action: dict | None = None
 
