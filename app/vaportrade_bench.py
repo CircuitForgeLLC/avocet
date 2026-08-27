@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import subprocess as _subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -111,7 +112,7 @@ def get_results_by_run_id(run_id: str) -> dict:
     return {"filename": f.name, "content": f.read_text(encoding="utf-8")}
 
 
-def _build_command(kind: str, users: int, label: str, cfg: dict) -> list[str]:
+def _build_command(kind: str, users: int, label: str, cfg: dict, timestamp: str) -> list[str]:
     repo_path, python_bin = cfg["repo_path"], cfg["python_bin"]
     if kind == "cost":
         script_cmd = ["env", "VT_BENCH=1", python_bin, "bench/cost_bench.py"]
@@ -123,10 +124,17 @@ def _build_command(kind: str, users: int, label: str, cfg: dict) -> list[str]:
         # README flow and this Avocet-triggered flow target the SAME
         # fixed port for exactly this reason (pre-flight ruling,
         # 2026-08-27 -- see this plan's ledger).
+        #
+        # --csv prefix follows bench/README.md's manual-run naming
+        # convention (load-<UTC-timestamp>-<label>-u<N>) so the CSVs this
+        # GUI produces match bench/make_report.py's glob
+        # (load-*-single-*_stats.csv / load-*-fleet-*_stats.csv) and each
+        # GUI-triggered run gets its own uniquely-named file instead of
+        # overwriting the last one.
         script_cmd = [python_bin, "-m", "locust", "-f", "bench/locustfile.py",
                        "--headless", "--host", "http://127.0.0.1:8951",
                        "--users", str(users), "--spawn-rate", "5", "--run-time", "2m",
-                       "--csv", f"bench/results/load-{label}"]
+                       "--csv", f"bench/results/load-{timestamp}-{label}-u{users}"]
     else:
         raise ValueError(f"unknown kind: {kind}")
 
@@ -134,6 +142,19 @@ def _build_command(kind: str, users: int, label: str, cfg: dict) -> list[str]:
         remote = f"cd '{repo_path}' && " + " ".join(script_cmd)
         return ["ssh", "-T", cfg["ssh_host"], remote]
     return script_cmd  # local Popen uses cwd=repo_path (set by the caller)
+
+
+def _make_report_command(cfg: dict) -> list[str]:
+    """Build the command to invoke VaporTrade's own bench/make_report.py as
+    a follow-up step after a successful cost/load run, so the GUI always
+    ends up with a fresh report-<ts>.md -- the one artifact list_results()
+    already knows how to find."""
+    repo_path, python_bin = cfg["repo_path"], cfg["python_bin"]
+    script_cmd = [python_bin, "bench/make_report.py"]
+    if cfg["ssh_host"]:
+        remote = f"cd '{repo_path}' && " + " ".join(script_cmd)
+        return ["ssh", "-T", cfg["ssh_host"], remote]
+    return script_cmd
 
 
 @router.get("/run")
@@ -152,7 +173,8 @@ def run_vaportrade_bench(
     cfg = _load_config()
     if not cfg["repo_path"]:
         raise HTTPException(500, "vaportrade_bench.repo_path not configured in label_tool.yaml")
-    cmd = _build_command(kind, users, label, cfg)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    cmd = _build_command(kind, users, label, cfg, timestamp)
 
     def generate():
         global _BENCH_RUNNING, _bench_proc
@@ -171,7 +193,23 @@ def run_vaportrade_bench(
                         yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
                 proc.wait()
                 if proc.returncode == 0:
-                    yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': 'generating report...'})}\n\n"
+                    report_cmd = _make_report_command(cfg)
+                    report_proc = _subprocess.Popen(
+                        report_cmd, stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT,
+                        text=True, bufsize=1,
+                        cwd=cfg["repo_path"] if not cfg["ssh_host"] else None,
+                    )
+                    _bench_proc = report_proc
+                    for line in report_proc.stdout:
+                        line = line.rstrip()
+                        if line:
+                            yield f"data: {json.dumps({'type': 'progress', 'message': line})}\n\n"
+                    report_proc.wait()
+                    if report_proc.returncode == 0:
+                        yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'Report generation exited with code {report_proc.returncode}'})}\n\n"
                 else:
                     yield f"data: {json.dumps({'type': 'error', 'message': f'Process exited with code {proc.returncode}'})}\n\n"
             finally:
