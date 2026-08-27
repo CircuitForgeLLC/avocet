@@ -26,23 +26,30 @@
         :class="{ active: benchMode === 'plans' }"
         @click="benchMode = 'plans'"
       >📐 Planning</button>
+      <button
+        class="mode-btn"
+        :class="{ active: benchMode === 'vaportrade' }"
+        @click="benchMode = 'vaportrade'"
+      >💨 VaporTrade</button>
     </div>
 
-    <ClassifierTab  v-if="benchMode === 'classifier'" />
-    <LlmEvalTab     v-if="benchMode === 'llm'" />
-    <StyleTab       v-if="benchMode === 'style'" />
-    <PlansBenchTab  v-if="benchMode === 'plans'" />
+    <ClassifierTab      v-if="benchMode === 'classifier'" />
+    <LlmEvalTab         v-if="benchMode === 'llm'" />
+    <StyleTab           v-if="benchMode === 'style'" />
+    <PlansBenchTab      v-if="benchMode === 'plans'" />
+    <VaporTradeBenchTab v-if="benchMode === 'vaportrade'" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import ClassifierTab  from './ClassifierTab.vue'
-import LlmEvalTab     from './LlmEvalTab.vue'
-import StyleTab       from './StyleTab.vue'
-import PlansBenchTab  from './PlansBenchTab.vue'
+import ClassifierTab      from './ClassifierTab.vue'
+import LlmEvalTab         from './LlmEvalTab.vue'
+import StyleTab           from './StyleTab.vue'
+import PlansBenchTab      from './PlansBenchTab.vue'
+import VaporTradeBenchTab from './VaporTradeBenchTab.vue'
 
-type BenchMode = 'classifier' | 'llm' | 'style' | 'plans'
+type BenchMode = 'classifier' | 'llm' | 'style' | 'plans' | 'vaportrade'
 const benchMode = ref<BenchMode>('classifier')
 </script>
 
