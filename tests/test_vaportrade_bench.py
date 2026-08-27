@@ -38,3 +38,15 @@ def test_run_rejects_unknown_kind(tmp_path, monkeypatch):
     client = _app_with_router(tmp_path, monkeypatch)
     r = client.get("/api/vaportrade-bench/run?kind=bogus")
     assert r.status_code == 400
+
+
+def test_run_rejects_unconstrained_label(tmp_path, monkeypatch):
+    client = _app_with_router(tmp_path, monkeypatch)
+    r = client.get("/api/vaportrade-bench/run?kind=load&label=$(rm -rf /)")
+    assert r.status_code == 422
+
+
+def test_results_by_run_id_rejects_malformed_run_id(tmp_path, monkeypatch):
+    client = _app_with_router(tmp_path, monkeypatch)
+    r = client.get("/api/vaportrade-bench/results/not-a-report-id")
+    assert r.status_code == 400

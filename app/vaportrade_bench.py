@@ -17,7 +17,7 @@ import json
 import logging
 import subprocess as _subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from fastapi import APIRouter, HTTPException, Query
@@ -96,6 +96,8 @@ def get_latest_results() -> dict:
 
 @router.get("/results/{run_id}")
 def get_results_by_run_id(run_id: str) -> dict:
+    if not run_id.startswith("report-"):
+        raise HTTPException(400, "Invalid run_id — expected report-YYYYMMDD-HHMMSS")
     f = _results_dir() / f"{run_id}.md"
     if not f.exists():
         raise HTTPException(404, f"Results not found: {run_id}")
@@ -131,7 +133,7 @@ def _build_command(kind: str, users: int, label: str, cfg: dict) -> list[str]:
 def run_vaportrade_bench(
     kind: str = Query(..., description="'cost' or 'load'"),
     users: int = Query(10, ge=1, le=1000, description="Locust virtual users (kind=load only)"),
-    label: str = Query("single", description="'single' or 'fleet' (kind=load only, spec Component 3)"),
+    label: Literal["single", "fleet"] = Query("single", description="'single' or 'fleet' (kind=load only, spec Component 3)"),
 ) -> StreamingResponse:
     global _BENCH_RUNNING, _bench_proc
 
