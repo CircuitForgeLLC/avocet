@@ -122,6 +122,14 @@ imitate:
       text_fields: [title]
       prompt_template: "Summarize the key rules described in this passage:\n\n{text}"
 
+# VaporTrade cost-benchmark/load-test GUI integration (Component 5).
+# repo_path: VaporTrade repo root. python_bin: VaporTrade's own venv Python
+# (NOT Avocet's cf env). ssh_host: empty = local Popen; set to dispatch via SSH.
+vaportrade_bench:
+  repo_path:  /path/to/vaportrade
+  python_bin: /path/to/vaportrade/venv/bin/python
+  ssh_host:   ""
+
 # ── Log corpus (Turnstone training data) ──────────────────────────────────────
 corpus:
   # Directory containing pipeline JSONL log files to ingest (pull-side).
